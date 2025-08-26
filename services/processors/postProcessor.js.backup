@@ -1,0 +1,753 @@
+// services/processors/postProcessor.js
+const TextNormalizer = require('../utils/textNormalizer');
+
+// Santa Clara County locations for scenario-aware dispatch generation
+const SANTA_CLARA_LOCATIONS = {
+  residential: [
+    '1425 El Camino Real',
+    '2850 Stevens Creek Blvd',
+    '3456 Homestead Road',
+    '789 Saratoga Avenue',
+    '1234 Winchester Blvd',
+    '567 Meridian Avenue',
+    '890 Bascom Avenue',
+    '2345 Camden Avenue'
+  ],
+  business: [
+    'Westfield Valley Fair Mall',
+    'Santana Row Shopping Center',
+    'Stanford Shopping Center',
+    'Great Mall of the Bay Area',
+    'San Jose City Hall',
+    'Valley Medical Center',
+    'Cisco Systems Campus',
+    'Apple Park Visitor Center'
+  ],
+  public: [
+    'Kelley Park',
+    'Almaden Lake Park',
+    'Central Park (Santa Clara)',
+    'Guadalupe River Park',
+    'Mitchell Park',
+    'Raging Waters San Jose',
+    'SAP Center at San Jose',
+    'Levi\'s Stadium parking lot'
+  ],
+  trauma: [
+    'Highway 101 construction zone',
+    'I-280 near Page Mill Road',
+    'Stevens Creek Trail',
+    'Los Gatos Creek Trail',
+    'Almaden Expressway overpass',
+    'Santa Clara University athletic field',
+    'San Jose State University gym',
+    'Local construction site on Bascom Ave'
+  ]
+};
+
+// Content filtering patterns
+const INAPPROPRIATE_PATTERNS = [
+  /\b(fuck|shit|damn|hell|bitch|ass|crap)\b/gi,
+  /\b(kill|murder|suicide|death|die|dead)\b/gi,
+  /\b(racist|sexist|homophobic|discriminatory)\b/gi,
+  /\b(graphic|gruesome|horrific|disturbing)\b/gi
+];
+
+// Medical terminology validation
+const VALID_EMT_TERMS = [
+  'chest pain', 'shortness of breath', 'difficulty breathing', 'abdominal pain',
+  'altered mental status', 'unconscious', 'seizure', 'stroke', 'cardiac arrest',
+  'trauma', 'fall', 'motor vehicle collision', 'mvc', 'laceration', 'fracture',
+  'allergic reaction', 'anaphylaxis', 'overdose', 'poisoning', 'burn', 'bleeding'
+];
+
+class PostProcessor {
+  /**
+   * Content filtering for inappropriate content
+   * @param {string} text - Text to filter
+   * @returns {boolean} - True if content is appropriate
+   */
+  static isContentAppropriate(text) {
+    if (!text || typeof text !== 'string') return true;
+    
+    for (const pattern of INAPPROPRIATE_PATTERNS) {
+      if (pattern.test(text)) {
+        console.log('❌ Content filtering: Inappropriate content detected');
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * Validate dispatch combination for realism
+   * @param {number} age - Patient age
+   * @param {string} gender - Patient gender
+   * @param {string} location - Location
+   * @param {string} condition - Medical condition
+   * @returns {boolean} - True if combination is realistic
+   */
+  static isDispatchRealistic(age, gender, location, condition) {
+    // Age-condition mismatches
+    if (age < 25 && condition.toLowerCase().includes('dementia')) return false;
+    if (age < 18 && location.toLowerCase().includes('construction')) return false;
+    if (age < 16 && location.toLowerCase().includes('office')) return false;
+    
+    // Location-condition mismatches
+    if (condition.toLowerCase().includes('drowning') && !location.toLowerCase().includes('pool') && !location.toLowerCase().includes('lake') && !location.toLowerCase().includes('water')) return false;
+    
+    return true;
+  }
+
+  /**
+   * Generate scenario-aware location based on scenario type
+   * @param {string} scenarioType - Type of scenario
+   * @param {number} seed - Randomization seed
+   * @returns {string} - Selected location
+   */
+  static generateScenarioAwareLocation(scenarioType, seed = 0) {
+    const type = scenarioType?.toLowerCase() || '';
+    let locationPool = SANTA_CLARA_LOCATIONS.residential; // default
+    
+    if (type.includes('trauma') || type.includes('accident') || type.includes('fall')) {
+      locationPool = SANTA_CLARA_LOCATIONS.trauma;
+    } else if (type.includes('cardiac') || type.includes('respiratory')) {
+      locationPool = [...SANTA_CLARA_LOCATIONS.residential, ...SANTA_CLARA_LOCATIONS.business];
+    } else if (type.includes('overdose') || type.includes('poisoning')) {
+      locationPool = [...SANTA_CLARA_LOCATIONS.public, ...SANTA_CLARA_LOCATIONS.residential];
+    }
+    
+    const index = Math.abs(seed) % locationPool.length;
+    return locationPool[index];
+  }
+
+  /**
+   * Generate bystander information based on location
+   * @param {string} location - Location string
+   * @param {number} seed - Randomization seed
+   * @returns {string} - Bystander information or empty string
+   */
+  static generateBystanderInfo(location, seed = 0) {
+    const loc = location.toLowerCase();
+    const shouldHaveBystander = (Math.abs(seed) % 3) === 0; // 33% chance
+    
+    if (!shouldHaveBystander) return '';
+    
+    if (loc.includes('home') || loc.includes('residential') || loc.includes('avenue') || loc.includes('road') || loc.includes('blvd')) {
+      return 'Family member on scene.';
+    } else if (loc.includes('office') || loc.includes('campus') || loc.includes('systems') || loc.includes('hall')) {
+      return 'Coworker present.';
+    } else if (loc.includes('construction') || loc.includes('athletic') || loc.includes('gym')) {
+      return 'Coworker on scene.';
+    } else if (loc.includes('mall') || loc.includes('center') || loc.includes('park') || loc.includes('public')) {
+      return 'Bystander present.';
+    }
+    
+    return 'Bystander on scene.';
+  }
+
+  /**
+   * Generate time in 12-hour format
+   * @param {number} seed - Randomization seed
+   * @returns {string} - Time in format like "2:30 PM"
+   */
+  static generateTime(seed = 0) {
+    const times = [
+      '8:15 AM', '9:30 AM', '10:45 AM', '11:20 AM', '12:15 PM',
+      '1:30 PM', '2:45 PM', '3:20 PM', '4:35 PM', '5:50 PM',
+      '6:25 PM', '7:40 PM', '8:15 PM', '9:30 PM', '10:45 PM'
+    ];
+    const index = Math.abs(seed) % times.length;
+    return times[index];
+  }
+
+  /**
+   * Detect if the user explicitly requests auscultation
+   * @param {string} userMessage - User message
+   * @returns {boolean} - True if auscultation requested
+   */
+  static userRequestedAuscultation(userMessage) {
+    const t = TextNormalizer.normalizeToAsciiLower(userMessage || '');
+    return /(auscultate|listen (to|for) (lung|chest|breath) sounds|stethoscope|lung sounds)/.test(t);
+  }
+
+  /**
+   * Add quotation marks around patient dialogue
+   * @param {string} text - Input text
+   * @returns {string} - Text with quoted patient dialogue
+   */
+  static addPatientDialogueQuotes(text) {
+    if (!text || typeof text !== 'string') return text;
+    
+    // Pattern to find patient dialogue (common patient speech patterns)
+    const dialoguePatterns = [
+      // Pattern: "I feel..." or "I'm..." at start of sentence
+      /\b(I\s+(?:feel|am|was|have|had|can't|cannot|don't|didn't|think|believe|need|want|would|will|know|remember)[^.!?]*[.!?])/gi,
+      // Pattern: "Yes", "No", "Okay", "Sure" etc. at start or after comma/period
+      /(?:^|[.!?]\s+)((?:Yes|No|Yeah|Nah|Okay|Sure|Alright|Fine|Maybe|I guess|Of course|Absolutely|Please|Help|Stop|Wait)[^.!?]*[.!?])/gi,
+      // Pattern: Questions from patient
+      /(?:^|[.!?]\s+)((?:What|Where|When|Why|How|Who|Can you|Could you|Will you|Are you|Is this)[^.!?]*\?)/gi,
+      // Pattern: Expressions of pain/discomfort
+      /(?:^|[.!?]\s+)((?:It hurts|That hurts|Ow|Ouch|Please be careful|Be gentle|That's painful)[^.!?]*[.!?])/gi
+    ];
+    
+    let processedText = text;
+    
+    dialoguePatterns.forEach(pattern => {
+      processedText = processedText.replace(pattern, (match, dialogue, offset) => {
+        // Check if already in quotes
+        if (dialogue.startsWith('"') && dialogue.endsWith('"')) {
+          return match; // Already quoted
+        }
+        
+        // Check if this appears to be actual dialogue vs descriptive text
+        const beforeChar = match.charAt(0);
+        const isStartOfSentence = /^[A-Z]/.test(dialogue) || beforeChar.match(/[.!?]/);
+        
+        if (isStartOfSentence) {
+          const quotedDialogue = `"${dialogue.trim()}"`;
+          return match.replace(dialogue, quotedDialogue);
+        }
+        
+        return match;
+      });
+    });
+    
+    return processedText;
+  }
+
+  /**
+   * Post-process assistant text to enforce objective-only policy globally
+   * @param {string} rawText - Raw AI response text
+   * @param {string} userMessage - User message
+   * @returns {string} - Processed text
+   */
+  static postProcessObjectiveContent(rawText, userMessage) {
+    if (!rawText || typeof rawText !== 'string') return rawText;
+    let text = rawText;
+
+    // Minimal fallback processing - most rules now handled by system prompt
+    // Only keep essential formatting that AI might miss occasionally
+    
+    // Ensure final line ends with the required phrase (fallback)
+    if (!/Awaiting your next step\.?\s*$/.test(text)) {
+      text = text.replace(/\s*$/m, '\n\nAwaiting your next step.');
+    }
+
+    return text.trim();
+  }
+
+  /**
+   * Generate dispatch message with retry mechanism and validation
+   * @param {string} rawContent - Raw AI content
+   * @param {Object} scenarioData - Scenario data (optional)
+   * @param {number} retryCount - Current retry attempt (0-2)
+   * @param {number} seed - Randomization seed
+   * @returns {string} - Processed content
+   */
+  static async enforceInitialDispatchMessage(rawContent, scenarioData = null, retryCount = 0, seed = null) {
+    const maxRetries = 3;
+    const startTime = Date.now();
+    const timeoutMs = 5000; // 5 second timeout
+    
+    // Generate seed if not provided
+    if (seed === null) {
+      seed = Date.now() + Math.random() * 1000;
+    }
+    
+    try {
+      // Check timeout
+      if (Date.now() - startTime > timeoutMs) {
+        throw new Error('Dispatch generation timeout exceeded (5 seconds)');
+      }
+      
+      const dispatch = await this.generateCompliantDispatch(rawContent, scenarioData, seed);
+      
+      // Validate content appropriateness
+      if (!this.isContentAppropriate(dispatch)) {
+        if (retryCount < maxRetries - 1) {
+          console.log(`🔄 Content inappropriate, retrying (${retryCount + 1}/${maxRetries})`);
+          return await this.enforceInitialDispatchMessage(rawContent, scenarioData, retryCount + 1, seed + 1);
+        } else {
+          throw new Error('Content filtering failed after 3 attempts');
+        }
+      }
+      
+      // Extract dispatch components for validation
+      const dispatchMatch = dispatch.match(/You have been dispatched to a (\d+) year old (male|female) at ([^,]+), ([^f]+) for (.+?)\./i);
+      if (dispatchMatch) {
+        const [, age, gender, location, time, condition] = dispatchMatch;
+        
+        // Validate realism
+        if (!this.isDispatchRealistic(parseInt(age), gender, location, condition)) {
+          if (retryCount < maxRetries - 1) {
+            console.log(`🔄 Unrealistic combination, retrying (${retryCount + 1}/${maxRetries})`);
+            return await this.enforceInitialDispatchMessage(rawContent, scenarioData, retryCount + 1, seed + 1);
+          } else {
+            console.log('⚠️ Proceeding with potentially unrealistic combination after 3 attempts');
+          }
+        }
+      }
+      
+      return dispatch;
+      
+    } catch (error) {
+      if (retryCount < maxRetries - 1) {
+        console.log(`🔄 Error occurred, retrying (${retryCount + 1}/${maxRetries}): ${error.message}`);
+        return await this.enforceInitialDispatchMessage(rawContent, scenarioData, retryCount + 1, seed + 1);
+      } else {
+        console.error('❌ All retry attempts failed:', error.message);
+        return `**Error:** Scenario generation failed after ${maxRetries} attempts. ${error.message}. Please refresh the page to try again.`;
+      }
+    }
+  }
+
+  /**
+   * Generate compliant dispatch message according to requirements
+   * @param {string} rawContent - Raw AI content
+   * @param {Object} scenarioData - Scenario data (optional)
+   * @param {number} seed - Randomization seed
+   * @returns {string} - Compliant dispatch message
+   */
+  static async generateCompliantDispatch(rawContent, scenarioData = null, seed = 0) {
+    try {
+      const text = String(rawContent || '');
+      
+      // Generate age based on scenario type and seed
+      let age;
+      const scenarioType = scenarioData?.subScenario?.toLowerCase() || '';
+      if (scenarioType.includes('cardiac') || scenarioType.includes('heart')) {
+        // Cardiac scenarios favor older patients
+        const cardiacAges = [45, 52, 58, 63, 67, 71, 76];
+        age = cardiacAges[Math.abs(seed) % cardiacAges.length];
+      } else if (scenarioType.includes('trauma') || scenarioType.includes('accident')) {
+        // Trauma scenarios have varied ages
+        const traumaAges = [19, 25, 32, 28, 41, 35, 29, 47];
+        age = traumaAges[Math.abs(seed) % traumaAges.length];
+      } else {
+        // General scenarios
+        const generalAges = [23, 31, 38, 44, 51, 59, 66];
+        age = generalAges[Math.abs(seed) % generalAges.length];
+      }
+      
+      // Generate gender
+      const genders = ['male', 'female'];
+      const gender = genders[Math.abs(seed + 1) % genders.length];
+      
+      // Generate scenario-aware location
+      const location = this.generateScenarioAwareLocation(scenarioType, seed + 2);
+      
+      // Generate time
+      const time = this.generateTime(seed + 3);
+      
+      // Generate somewhat specific condition based on scenario type
+      let condition;
+      if (scenarioType.includes('cardiac')) {
+        const cardiacConditions = [
+          'chest pain radiating to left arm',
+          'chest discomfort with shortness of breath',
+          'crushing chest pain and sweating',
+          'chest tightness and nausea'
+        ];
+        condition = cardiacConditions[Math.abs(seed + 4) % cardiacConditions.length];
+      } else if (scenarioType.includes('respiratory')) {
+        const respiratoryConditions = [
+          'difficulty breathing with wheezing',
+          'shortness of breath and chest tightness',
+          'severe breathing difficulty',
+          'respiratory distress with coughing'
+        ];
+        condition = respiratoryConditions[Math.abs(seed + 4) % respiratoryConditions.length];
+      } else if (scenarioType.includes('trauma')) {
+        const traumaConditions = [
+          'fall from ladder with possible head injury',
+          'motor vehicle collision with chest pain',
+          'sports injury with shoulder pain',
+          'fall with possible leg fracture',
+          'accident with multiple injuries'
+        ];
+        condition = traumaConditions[Math.abs(seed + 4) % traumaConditions.length];
+      } else if (scenarioType.includes('neurological')) {
+        const neuroConditions = [
+          'sudden weakness on one side',
+          'confusion and difficulty speaking',
+          'severe headache with vision changes',
+          'altered mental status'
+        ];
+        condition = neuroConditions[Math.abs(seed + 4) % neuroConditions.length];
+      } else if (scenarioType.includes('metabolic')) {
+        const metabolicConditions = [
+          'confusion and dizziness',
+          'altered mental status with sweating',
+          'weakness and disorientation',
+          'diabetic emergency symptoms'
+        ];
+        condition = metabolicConditions[Math.abs(seed + 4) % metabolicConditions.length];
+      } else {
+        // Default conditions
+        const defaultConditions = [
+          'chest pain and shortness of breath',
+          'difficulty breathing',
+          'abdominal pain and nausea',
+          'dizziness and weakness'
+        ];
+        condition = defaultConditions[Math.abs(seed + 4) % defaultConditions.length];
+      }
+      
+      // Generate bystander info
+      const bystanderInfo = this.generateBystanderInfo(location, seed + 5);
+      
+      // Build the compliant dispatch message
+      let dispatchMessage = `**Dispatch Information:** You have been dispatched to a ${age} year old ${gender} at ${location}, ${time} for ${condition}.`;
+      
+      // Add bystander info if present
+      if (bystanderInfo) {
+        dispatchMessage += ` ${bystanderInfo}`;
+      }
+      
+      dispatchMessage += '\n\nLet me know when you are ready to begin the scenario. It is recommended that you use voice input to practice your verbal communication skills.';
+      
+      return dispatchMessage;
+      
+    } catch (error) {
+      console.error('❌ Error generating compliant dispatch:', error);
+      // Fallback to basic dispatch
+      return '**Dispatch Information:** You have been dispatched to a 45 year old male at 1425 El Camino Real, 2:30 PM for chest pain and shortness of breath.\n\nLet me know when you are ready to begin the scenario. It is recommended that you use voice input to practice your verbal communication skills.';
+    }
+  }
+
+  /**
+   * Build dispatch information from template-generated data
+   * @param {Object} templateData - The template-generated scenario data
+   * @returns {string} - Formatted dispatch information
+   */
+  static async buildDispatchFromTemplateData(templateData) {
+      if (scenarioTitleMatch) {
+        let title = scenarioTitleMatch[1].trim();
+        // Convert scenario title to mechanism description
+        if (title.toLowerCase().includes('asthma') || title.toLowerCase().includes('breathing') || title.toLowerCase().includes('respiratory')) {
+          mechanism = 'complaining of shortness of breath';
+        } else if (title.toLowerCase().includes('cardiac') || title.toLowerCase().includes('heart')) {
+          mechanism = 'complaining of chest pain';
+        } else if (title.toLowerCase().includes('trauma') || title.toLowerCase().includes('accident')) {
+          mechanism = 'involved in an accident';
+        } else if (title.toLowerCase().includes('hypoglycemic') || title.toLowerCase().includes('diabetic') || title.toLowerCase().includes('metabolic')) {
+          mechanism = 'experiencing altered mental status';
+        } else if (title.toLowerCase().includes('seizure')) {
+          mechanism = 'experiencing a seizure';
+        } else if (title.toLowerCase().includes('stroke') || title.toLowerCase().includes('neurological')) {
+          mechanism = 'experiencing neurological symptoms';
+        } else {
+          mechanism = 'requiring medical attention';
+        }
+      } else {
+        // Look for chief complaint pattern: **Chief Complaint:** Shortness of breath
+        const chiefComplaintMatch = cleanText.match(/\*\*Chief Complaint:\*\*\s*([^**\n]+)/i);
+        if (chiefComplaintMatch) {
+          let complaint = chiefComplaintMatch[1].trim();
+          // Clean up the complaint - remove quotes and make it concise
+          complaint = complaint.replace(/["""]/g, '').replace(/[!?]+/g, '');
+          // Take only the first part if it's too long
+          if (complaint.length > 50) {
+            complaint = complaint.split(/[.!?]/)[0].trim();
+          }
+          // Convert to proper mechanism format
+          if (complaint.toLowerCase().includes('breath') || complaint.toLowerCase().includes('breathing')) {
+            mechanism = 'complaining of shortness of breath';
+          } else if (complaint.toLowerCase().includes('chest') || complaint.toLowerCase().includes('pain')) {
+            mechanism = 'complaining of chest pain';
+          } else if (complaint.toLowerCase().includes('confusion') || complaint.toLowerCase().includes('altered')) {
+            mechanism = 'experiencing altered mental status';
+          } else {
+            mechanism = `complaining of ${complaint.toLowerCase()}`;
+          }
+        } else {
+          // Look for dispatch information that mentions the reason
+          const dispatchMatch = cleanText.match(/\*\*Dispatch Information:\*\*\s*([^**\n]+)/i);
+          if (dispatchMatch) {
+            const dispatchText = dispatchMatch[1];
+            // Extract the reason from dispatch text
+            const reasonMatch = dispatchText.match(/(?:reports?|complaining of|found|involved in|experiencing)\s+([^\.]+)/i);
+            if (reasonMatch) {
+              let reason = reasonMatch[1].trim();
+              // Clean up the reason - remove quotes and make it concise
+              reason = reason.replace(/["""]/g, '').replace(/[!?]+/g, '');
+              if (reason.length > 50) {
+                reason = reason.split(/[.!?]/)[0].trim();
+              }
+              mechanism = reason;
+            }
+          }
+        }
+      }
+      
+      // If still no mechanism found, try to infer from scenario type and use concise defaults
+      if (!mechanism) {
+        // Check for trauma scenarios first (higher priority to avoid medical pattern conflicts)
+        if (cleanText.toLowerCase().includes('mvc') || cleanText.toLowerCase().includes('motor vehicle') || cleanText.toLowerCase().includes('car accident') || cleanText.toLowerCase().includes('collision')) {
+          mechanism = 'motor vehicle collision, chest pain';
+        } else if (cleanText.toLowerCase().includes('fall') || cleanText.toLowerCase().includes('fell')) {
+          mechanism = 'fell from height, back pain';
+        } else if (cleanText.toLowerCase().includes('trauma') || cleanText.toLowerCase().includes('accident') || cleanText.toLowerCase().includes('injury')) {
+          mechanism = 'involved in accident, multiple injuries';
+        } else if (cleanText.toLowerCase().includes('assault') || cleanText.toLowerCase().includes('fight')) {
+          mechanism = 'assault victim, conscious';
+        } else if (cleanText.toLowerCase().includes('burn') || cleanText.toLowerCase().includes('fire')) {
+          mechanism = 'burn injuries to arms';
+        } else if (cleanText.toLowerCase().includes('laceration') || cleanText.toLowerCase().includes('cut') || cleanText.toLowerCase().includes('bleeding')) {
+          mechanism = 'traumatic injuries, bleeding';
+        // Medical scenarios (checked after trauma to avoid conflicts)
+        } else if (cleanText.toLowerCase().includes('respiratory') || cleanText.toLowerCase().includes('breathing') || cleanText.toLowerCase().includes('asthma')) {
+          mechanism = 'difficulty breathing';
+        } else if (cleanText.toLowerCase().includes('cardiac') || cleanText.toLowerCase().includes('chest') || cleanText.toLowerCase().includes('heart')) {
+          mechanism = 'chest pain and shortness of breath';
+        } else if (cleanText.toLowerCase().includes('metabolic') || cleanText.toLowerCase().includes('diabetes') || cleanText.toLowerCase().includes('hypoglycemic')) {
+          mechanism = 'confusion and dizziness';
+        } else if (cleanText.toLowerCase().includes('neurological') || cleanText.toLowerCase().includes('stroke') || cleanText.toLowerCase().includes('seizure')) {
+          mechanism = 'sudden weakness on one side';
+        } else if (cleanText.toLowerCase().includes('overdose') || cleanText.toLowerCase().includes('poisoning')) {
+          mechanism = 'unconscious, found by family';
+        } else if (cleanText.toLowerCase().includes('allergic') || cleanText.toLowerCase().includes('anaphylaxis')) {
+          mechanism = 'difficulty breathing after bee sting';
+        } else {
+          mechanism = 'unconscious, found by family';
+        }
+      }
+      
+      // If we found age and gender, create the proper dispatch format
+      if (age && gender) {
+        // Generate location and time
+        const locations = [
+          'a local park',
+          'a residential address',
+          'a shopping center',
+          'an office building',
+          'a university campus',
+          'a community center',
+          'a restaurant',
+          'a fitness center',
+          'a bus stop',
+          'a parking lot'
+        ];
+        
+        const times = [
+          '2:15 PM',
+          '10:30 AM',
+          '4:45 PM',
+          '11:20 AM',
+          '3:30 PM',
+          '1:45 PM',
+          '9:15 AM',
+          '5:20 PM',
+          '12:30 PM',
+          '8:45 AM'
+        ];
+        
+        // Use deterministic selection based on age and gender for consistency
+        const locationIndex = (parseInt(age) + gender.length) % locations.length;
+        const timeIndex = (parseInt(age) * 2 + gender.charCodeAt(0)) % times.length;
+        
+        const location = locations[locationIndex];
+        const time = times[timeIndex];
+        
+        let dispatchLine = `**Dispatch Information:** You are dispatched to ${location} at ${time} for a ${age}-year-old ${gender}`;
+        if (mechanism) {
+          dispatchLine += ` ${mechanism}`;
+        }
+        dispatchLine += '.';
+        return `${dispatchLine}\n\nLet me know when you are ready to begin the scenario. It is recommended that you use voice input to practice your verbal communication skills.`;
+      }
+      
+      // If age and gender are not found, generate them based on scenario type
+      if (!age || !gender) {
+        // Generate deterministic age and gender for consistency
+        const ages = [25, 35, 45, 55, 65];
+        const genders = ['male', 'female'];
+        const locations = [
+          'a local park',
+          'a residential address',
+          'a shopping center',
+          'an office building',
+          'a university campus',
+          'a community center',
+          'a restaurant',
+          'a fitness center',
+          'a bus stop',
+          'a parking lot'
+        ];
+        
+        const times = [
+          '2:15 PM',
+          '10:30 AM',
+          '4:45 PM',
+          '11:20 AM',
+          '3:30 PM',
+          '1:45 PM',
+          '9:15 AM',
+          '5:20 PM',
+          '12:30 PM',
+          '8:45 AM'
+        ];
+        
+        // Use deterministic selection for consistency
+        const ageIndex = cleanText.length % ages.length;
+        const genderIndex = cleanText.charCodeAt(0) % genders.length;
+        const locationIndex = cleanText.length % locations.length;
+        const timeIndex = (cleanText.length + cleanText.charCodeAt(0)) % times.length;
+        
+        const randomAge = ages[ageIndex];
+        const randomGender = genders[genderIndex];
+        const location = locations[locationIndex];
+        const time = times[timeIndex];
+        
+        let dispatchLine = `**Dispatch Information:** You are dispatched to ${location} at ${time} for a ${randomAge}-year-old ${randomGender}`;
+        if (mechanism) {
+          dispatchLine += ` ${mechanism}`;
+        } else {
+          // Default mechanism - use concise, specific information that provides educational hints
+          // Create dispatch info based on common EMT scenarios with educational value
+          const educationalMechanisms = [
+            'chest discomfort and shortness of breath',
+            'difficulty breathing',
+            'sudden onset of weakness',
+            'confused and disoriented',
+            'abdominal pain and nausea',
+            'fall with possible injury',
+            'dizziness and sweating'
+          ];
+          // Use deterministic selection for consistency
+          const mechanismIndex = cleanText.length % educationalMechanisms.length;
+          dispatchLine += ` ${educationalMechanisms[mechanismIndex]}`;
+        }
+        dispatchLine += '.';
+        return `${dispatchLine}\n\nLet me know when you are ready to begin the scenario. It is recommended that you use voice input to practice your verbal communication skills.`;
+      }
+      
+      // Fallback: try to find existing dispatch information and format it
+      const dispatchMatch = cleanText.match(/\*\*Dispatch Information:\*\*\s*([^**\n]+)/i);
+      if (dispatchMatch) {
+        const dispatchContent = dispatchMatch[1].trim();
+        return `**Dispatch Information:** ${dispatchContent}\n\nLet me know when you are ready to begin the scenario. It is recommended that you use voice input to practice your verbal communication skills.`;
+      }
+      
+      // Final fallback: use the first sentence
+      const firstSentence = cleanText.match(/^[^.!?\n]+[.!?\n]/);
+      if (firstSentence) {
+        const dispatchLine = firstSentence[0].trim();
+        return `**Dispatch Information:** ${dispatchLine}\n\nLet me know when you are ready to begin the scenario. It is recommended that you use voice input to practice your verbal communication skills.`;
+      }
+      
+      // Last resort: create a reasonable default dispatch with educational value
+      return `**Dispatch Information:** You are dispatched to a residential address at 2:30 PM for a 45-year-old patient complaining of chest discomfort and shortness of breath.\n\nLet me know when you are ready to begin the scenario. It is recommended that you use voice input to practice your verbal communication skills.`;
+    } catch (error) {
+      return rawContent;
+    }
+  }
+
+  /**
+   * Build dispatch information from template-generated data
+   * @param {Object} templateData - The template-generated scenario data
+   * @returns {string} - Formatted dispatch information
+   */
+  static async buildDispatchFromTemplateData(templateData) {
+    try {
+      const dispatchInfo = templateData.dispatchInfo;
+      const presentation = templateData.presentation;
+      const patientProfile = templateData.patientProfile;
+      
+      console.log('📋 Building dispatch from template data:', { dispatchInfo, patientProfile });
+      
+      // Extract the basic information
+      const location = dispatchInfo.location || 'unknown location';
+      const time = dispatchInfo.time || 'unknown time';
+      const callerInfo = dispatchInfo.callerInfo || 'unknown caller';
+      const mechanism = dispatchInfo.mechanism || 'unknown complaint';
+      
+      // Build the dispatch message
+      let dispatchLine = `**Dispatch Information:** You are dispatched to ${location} at ${time}`;
+      
+      // Add patient info if available
+      if (patientProfile?.age && patientProfile?.age !== 'unknown') {
+        dispatchLine += ` for a ${patientProfile.age}`;
+        if (patientProfile?.gender && patientProfile?.gender !== 'unknown') {
+          dispatchLine += ` ${patientProfile.gender}`;
+        }
+      }
+      
+      // Add the mechanism/complaint
+      dispatchLine += ` ${mechanism}.`;
+      
+      // Add caller information
+      if (callerInfo !== 'unknown caller') {
+        dispatchLine += ` Called in by ${callerInfo}.`;
+      }
+      
+      console.log('✅ Generated dispatch message:', dispatchLine);
+      
+      return `${dispatchLine}\n\nLet me know when you are ready to begin the scenario. It is recommended that you use voice input to practice your verbal communication skills.`;
+      
+    } catch (error) {
+      console.error('❌ Error building dispatch from template data:', error);
+      return '**Dispatch Information:** You are dispatched to a residential address at 2:30 PM for a patient complaining of chest discomfort and shortness of breath.\n\nLet me know when you are ready to begin the scenario. It is recommended that you use voice input to practice your verbal communication skills.';
+    }
+  }
+
+  /**
+   * Build dispatch message from AI-generated scenario data
+   * @param {Object} generatedScenario - Complete AI-generated scenario
+   * @returns {string} - Formatted dispatch message
+   */
+  static async buildDispatchFromScenario(generatedScenario) {
+    try {
+      const { patientProfile, dispatchInfo, presentation } = generatedScenario;
+      
+      // Extract information with fallbacks
+      const age = patientProfile?.age || 'unknown age';
+      const gender = patientProfile?.gender || 'unknown gender';
+      const location = dispatchInfo?.location || 'a residential address';
+      
+      // Ensure we have a proper time - if it's a placeholder or missing, generate one
+      let time = dispatchInfo?.time || '2:30 PM';
+      if (time.includes('<') || time.includes('>') || time === 'afternoon' || time === 'morning' || time === 'evening') {
+        // Generate a proper time if we got a placeholder
+        const times = ['2:15 PM', '10:30 AM', '4:45 PM', '11:20 AM', '3:30 PM', '1:45 PM', '9:15 AM', '5:20 PM', '12:30 PM', '8:45 AM'];
+        const ageNum = parseInt(age) || 45;
+        const timeIndex = (ageNum + gender.length) % times.length;
+        time = times[timeIndex];
+      }
+      
+      const mechanism = dispatchInfo?.mechanism || presentation?.chiefComplaint || 'chest discomfort and shortness of breath';
+      
+      // Build the dispatch line with consistent format
+      let dispatchLine = `**Dispatch Information:** You are dispatched to ${location} at ${time} for a ${age}-year-old ${gender}`;
+      
+      // Add mechanism/complaint
+      if (mechanism) {
+        // Clean up mechanism format
+        let cleanMechanism = mechanism.toLowerCase();
+        // Add appropriate prefix if not already present
+        if (!cleanMechanism.includes('complaining') && !cleanMechanism.includes('experiencing') && !cleanMechanism.includes('involved')) {
+          if (cleanMechanism.includes('pain') || cleanMechanism.includes('breath') || cleanMechanism.includes('nausea')) {
+            cleanMechanism = `complaining of ${cleanMechanism}`;
+          } else if (cleanMechanism.includes('seizure') || cleanMechanism.includes('confusion') || cleanMechanism.includes('weakness')) {
+            cleanMechanism = `experiencing ${cleanMechanism}`;
+          } else if (cleanMechanism.includes('accident') || cleanMechanism.includes('fall') || cleanMechanism.includes('trauma')) {
+            cleanMechanism = `involved in ${cleanMechanism}`;
+          } else {
+            cleanMechanism = `with ${cleanMechanism}`;
+          }
+        }
+        dispatchLine += ` ${cleanMechanism}`;
+      }
+      
+      dispatchLine += '.';
+      
+      return `${dispatchLine}\n\nLet me know when you are ready to begin the scenario. It is recommended that you use voice input to practice your verbal communication skills.`;
+    } catch (error) {
+      console.error('❌ Error building dispatch from scenario:', error);
+      return '**Dispatch Information:** You are dispatched to a residential address at 2:30 PM for a 58-year-old male complaining of chest discomfort and shortness of breath.\n\nLet me know when you are ready to begin the scenario. It is recommended that you use voice input to practice your verbal communication skills.';
+    }
+  }
+}
+
+module.exports = PostProcessor;
