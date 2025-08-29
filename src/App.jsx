@@ -385,8 +385,8 @@ export default function App() {
     checkBackendConnection();
   }, []);
 
-  // Show fallback UI if backend is not connected
-  if (!backendConnected && config.isProduction) {
+  // Show fallback UI if backend is not connected and backend is supposed to be deployed
+  if (!backendConnected && config.isProduction && config.backendDeployed) {
     return (
       <div style={{
         minHeight: '100vh',
@@ -410,22 +410,31 @@ export default function App() {
           <p style={{ marginBottom: '2rem', fontSize: '1.1rem', opacity: 0.9 }}>
             Welcome to the EMT Scenario Trainer! This is a comprehensive AI-powered training platform for Emergency Medical Technicians.
           </p>
-          <div style={{
-            backgroundColor: 'rgba(255, 255, 255, 0.1)',
-            borderRadius: '15px',
-            padding: '2rem',
-            marginBottom: '2rem'
-          }}>
-            <h3 style={{ marginBottom: '1rem', color: '#ffd700' }}>⚠️ Backend Service Unavailable</h3>
-            <p style={{ marginBottom: '1rem' }}>
-              The backend service is currently not deployed. To use the full functionality:
-            </p>
-            <ul style={{ textAlign: 'left', marginBottom: '1rem' }}>
-              <li>Deploy the backend to a cloud service (Render, Heroku, etc.)</li>
-              <li>Update the API URL in <code>src/config.js</code></li>
-              <li>Or run the application locally with <code>npm run dev:all</code></li>
-            </ul>
-          </div>
+                      <div style={{
+              backgroundColor: 'rgba(255, 255, 255, 0.1)',
+              borderRadius: '15px',
+              padding: '2rem',
+              marginBottom: '2rem'
+            }}>
+              <h3 style={{ marginBottom: '1rem', color: '#ffd700' }}>⚠️ Backend Service Configuration</h3>
+              <p style={{ marginBottom: '1rem' }}>
+                The backend service URL needs to be configured. To connect to your deployed backend:
+              </p>
+              <ul style={{ textAlign: 'left', marginBottom: '1rem' }}>
+                <li>Update <code>backendUrl</code> in <code>src/config.js</code> with your deployed backend URL</li>
+                <li>Set <code>backendDeployed: true</code> in the same file</li>
+                <li>Rebuild and redeploy the frontend</li>
+                <li>Or run locally with <code>npm run dev:all</code> for full functionality</li>
+              </ul>
+              <div style={{
+                backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                borderRadius: '10px',
+                padding: '1rem',
+                marginTop: '1rem'
+              }}>
+                <strong>Current Backend URL:</strong> <code>{config.backendUrl}</code>
+              </div>
+            </div>
           <div style={{
             backgroundColor: 'rgba(255, 255, 255, 0.1)',
             borderRadius: '15px',

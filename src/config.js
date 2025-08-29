@@ -2,7 +2,7 @@
 const config = {
   // API base URL - changes based on environment
   apiBaseUrl: process.env.NODE_ENV === 'production' 
-    ? 'http://localhost:3000/api'  // Temporarily use localhost until backend is deployed
+    ? 'https://emt-scenario-trainer.onrender.com/api'  // Deployed backend on Render
     : 'http://localhost:3000/api',
   
   // Environment detection
@@ -13,7 +13,10 @@ const config = {
   basePath: process.env.NODE_ENV === 'production' ? '/emt-scenario-trainer' : '',
   
   // Backend deployment status
-  backendDeployed: false, // Set to true when backend is deployed
+  backendDeployed: true, // Backend is now deployed and running
+  
+  // Backend deployment URL
+  backendUrl: 'https://emt-scenario-trainer.onrender.com', // Deployed backend on Render
 };
 
 export default config;
