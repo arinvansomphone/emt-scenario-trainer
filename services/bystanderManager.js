@@ -550,6 +550,47 @@ class BystanderManager {
   }
 
   /**
+   * Generate bystander response to EMT action/question
+   * @param {string} userMessage - EMT message
+   * @param {Object} actionResult - Recognized action (optional)
+   * @returns {string|null} - Bystander response or null
+   */
+  generateResponse(userMessage, actionResult = null) {
+    if (this.currentBystanders.length === 0) {
+      return null;
+    }
+
+    const normalizedMessage = userMessage.toLowerCase();
+    const respondingBystander = this.selectRespondingBystander(normalizedMessage);
+    
+    if (!respondingBystander) {
+      return null;
+    }
+
+    // Generate appropriate response based on message content
+    let response = this.generateBystanderDialogue(respondingBystander, normalizedMessage);
+    
+    // Mark bystander as having spoken
+    respondingBystander.hasSpoken = true;
+    
+    console.log('👥 Bystander response generated:', { 
+      type: respondingBystander.type, 
+      response: response.substring(0, 50) + '...' 
+    });
+    
+    return response;
+  }
+
+  /**
+   * Reset bystander manager for new scenario
+   */
+  reset() {
+    this.currentBystanders = [];
+    this.scenarioLocation = null;
+    console.log('🔄 Bystander manager reset');
+  }
+
+  /**
    * Get current bystander status for scenario context
    * @returns {Object} - Current bystander status
    */

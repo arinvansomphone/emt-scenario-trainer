@@ -23,7 +23,24 @@ class TemplateGenerator {
    * @returns {string} - Template prompt
    */
   generateDispatchTemplate(scenarioType) {
-    return `Generate dispatch information for a ${scenarioType}. Fill in this template with realistic details:
+    const traumaScenarios = ['MVC Scenario', 'Fall Scenario', 'Assault Scenario', 'Sport Injury Scenario', 'Stabbing Scenario', 'GSW Scenario', 'Burn Scenario'];
+    const isTrauma = traumaScenarios.includes(scenarioType);
+    
+    const categoryRequirement = isTrauma 
+      ? `🚨 TRAUMA SCENARIO REQUIREMENT: This MUST be a trauma/injury scenario with physical injuries from external mechanisms (collision, fall, stabbing, etc.). NO medical illness or disease processes.`
+      : `🚨 MEDICAL SCENARIO REQUIREMENT: This MUST be a medical scenario with illness/disease processes. NO trauma, injuries, or external mechanisms.`;
+    
+    const mechanismExamples = isTrauma
+      ? this.getTraumaMechanismExamples(scenarioType)
+      : this.getMedicalMechanismExamples(scenarioType);
+    
+    return `Generate dispatch information for a ${scenarioType}. 
+
+${categoryRequirement}
+
+${mechanismExamples}
+
+Fill in this template with realistic details:
 
 {
   "location": "[specific location where incident occurred - be specific like 'shopping mall food court', 'hiking trail near Pine Ridge Park', 'residential home on Oak Street']",
@@ -39,6 +56,42 @@ CRITICAL REQUIREMENTS:
 - All fields are required
 
 Return ONLY the JSON object, no additional text or comments.`;
+  }
+
+  /**
+   * Get trauma mechanism examples for specific scenario types
+   * @param {string} scenarioType - Type of trauma scenario
+   * @returns {string} - Examples for trauma mechanisms
+   */
+  getTraumaMechanismExamples(scenarioType) {
+    const examples = {
+      'MVC Scenario': 'Examples: "motor vehicle collision, chest pain" | "car accident, leg pain" | "vehicle rollover, head injury"',
+      'Fall Scenario': 'Examples: "fell from ladder, back pain" | "fall from roof, leg pain" | "fell down stairs, hip pain"',
+      'Stabbing Scenario': 'Examples: "stabbed in abdomen, conscious" | "knife wound to chest, alert" | "stabbing victim, arm injury"',
+      'Assault Scenario': 'Examples: "assault victim, head injury" | "beaten with object, arm injury" | "attacked, facial injuries"',
+      'Sport Injury Scenario': 'Examples: "football injury, shoulder pain" | "bicycle accident, head injury" | "skiing accident, leg injury"',
+      'GSW Scenario': 'Examples: "gunshot wound to leg, conscious" | "shooting victim, chest wound" | "gunshot to arm, alert"',
+      'Burn Scenario': 'Examples: "burned in kitchen fire, arm burns" | "house fire victim, face burns" | "chemical burn, hand injury"'
+    };
+    return examples[scenarioType] || 'Examples: "injury from external mechanism, pain/injury location"';
+  }
+
+  /**
+   * Get medical mechanism examples for specific scenario types
+   * @param {string} scenarioType - Type of medical scenario
+   * @returns {string} - Examples for medical mechanisms
+   */
+  getMedicalMechanismExamples(scenarioType) {
+    const examples = {
+      'Cardiac Scenario': 'Examples: "chest pain and shortness of breath" | "chest pain, sweating" | "heart palpitations"',
+      'Respiratory Scenario': 'Examples: "difficulty breathing" | "trouble breathing, wheezing" | "shortness of breath"',
+      'Neurologic Scenario': 'Examples: "sudden weakness on one side" | "confusion and slurred speech" | "severe headache"',
+      'Metabolic Scenario': 'Examples: "confusion and dizziness" | "diabetic emergency, unconscious" | "weakness and nausea"',
+      'Abdominal Scenario': 'Examples: "severe stomach pain" | "vomiting blood" | "abdominal pain and nausea"',
+      'Environmental Scenario': 'Examples: "difficulty breathing after bee sting" | "heat exhaustion, dizzy" | "allergic reaction"',
+      'OB/GYN Scenario': 'Examples: "pregnant woman, contractions" | "heavy bleeding" | "pregnancy complications"'
+    };
+    return examples[scenarioType] || 'Examples: "medical symptoms or illness presentation"';
   }
 
   /**

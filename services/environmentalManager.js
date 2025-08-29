@@ -484,6 +484,43 @@ class EnvironmentalManager {
 
     return urgentConcerns.length > 0 ? urgentConcerns : null;
   }
+
+  /**
+   * Generate environmental factor for current scenario
+   * @returns {string|null} - Environmental factor description
+   */
+  generateFactor() {
+    // Only generate environmental factors occasionally (20% chance)
+    if (Math.random() > 0.2) {
+      return null;
+    }
+
+    if (!this.currentEnvironment) {
+      return null;
+    }
+
+    const factors = [];
+
+    if (this.currentEnvironment.weather) {
+      const weather = this.currentEnvironment.weather;
+      factors.push(`Weather: ${weather.description}`);
+    }
+
+    if (this.currentEnvironment.sceneHazard) {
+      const hazard = this.currentEnvironment.sceneHazard;
+      factors.push(`Scene hazard: ${hazard.description}`);
+    }
+
+    return factors.length > 0 ? factors[Math.floor(Math.random() * factors.length)] : null;
+  }
+
+  /**
+   * Reset environmental manager for new scenario
+   */
+  reset() {
+    this.currentEnvironment = null;
+    console.log('🌤️ Environmental manager reset');
+  }
 }
 
 module.exports = EnvironmentalManager;

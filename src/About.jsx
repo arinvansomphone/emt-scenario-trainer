@@ -5,7 +5,7 @@ export default function About() {
   return (
     <div style={{ 
       minHeight: '100vh',
-      background: 'linear-gradient(135deg, #FFF0F6 0%, #F5F0FF 100%)',
+      background: '#1e3a8a',
       display: 'flex',
       flexDirection: 'column'
     }}>

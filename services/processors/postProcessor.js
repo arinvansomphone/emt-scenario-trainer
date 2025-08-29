@@ -306,6 +306,34 @@ class PostProcessor {
    */
   static async generateCompliantDispatch(rawContent, scenarioData = null, seed = 0) {
     try {
+      // Check if we have template-generated dispatch info to use
+      if (scenarioData?.dispatchInfo) {
+        console.log('✅ Using template-generated dispatch info');
+        const dispatchInfo = scenarioData.dispatchInfo;
+        
+        // Extract patient info from scenario data if available
+        let age = 'unknown';
+        let gender = 'unknown';
+        
+        if (scenarioData?.generatedScenario?.patientProfile) {
+          age = scenarioData.generatedScenario.patientProfile.age || 'unknown';
+          gender = scenarioData.generatedScenario.patientProfile.gender || 'unknown';
+        }
+        
+        // Use template-generated dispatch info
+        const location = dispatchInfo.location || '1425 El Camino Real';
+        const time = dispatchInfo.time || '2:30 PM';
+        const mechanism = dispatchInfo.mechanism || 'medical emergency';
+        const callerInfo = dispatchInfo.callerInfo || 'bystander on scene';
+        
+        // Build dispatch message using template data
+        let dispatchMessage = `**Dispatch Information:** You have been dispatched to a ${age} year old ${gender} at ${location}, ${time} for ${mechanism}. ${callerInfo}.`;
+        dispatchMessage += '\n\nLet me know when you are ready to begin the scenario. It is recommended that you use voice input to practice your verbal communication skills.';
+        
+        console.log('📝 Using template dispatch:', { location, time, mechanism, callerInfo });
+        return dispatchMessage;
+      }
+      
       // Generate truly random seed if not provided or if seed is 0
       if (!seed || seed === 0) {
         seed = Math.floor(Math.random() * 1000000) + Date.now();
@@ -408,18 +436,49 @@ class PostProcessor {
         ];
         condition = respiratoryConditions[(validSeed + 4) % respiratoryConditions.length];
       } else if (scenarioType.includes('trauma')) {
-        const traumaConditions = [
-          'fall from ladder with possible head injury',
-          'motor vehicle collision with chest pain',
-          'sports injury with shoulder pain',
-          'fall with possible leg fracture',
-          'accident with multiple injuries',
-          'bicycle accident with road rash',
-          'workplace injury with back pain',
-          'slip and fall with wrist injury',
-          'construction accident with leg pain'
-        ];
-        condition = traumaConditions[(validSeed + 4) % traumaConditions.length];
+        // Check for specific trauma subtypes
+        if (scenarioType.includes('mvc') || scenarioType.includes('motor vehicle') || scenarioType.includes('car accident')) {
+          const mvcConditions = [
+            'motor vehicle collision with head trauma',
+            'car accident with chest pain and difficulty breathing',
+            'vehicle rollover with multiple injuries',
+            'rear-end collision with neck pain',
+            'side-impact collision with abdominal pain',
+            'head-on collision with unconscious driver',
+            'multi-vehicle pileup with critical injuries',
+            'pedestrian struck by vehicle with leg injuries'
+          ];
+          condition = mvcConditions[(validSeed + 4) % mvcConditions.length];
+        } else if (scenarioType.includes('fall')) {
+          const fallConditions = [
+            'fall from ladder with possible head injury',
+            'fall from roof with back pain',
+            'slip and fall with hip fracture',
+            'fall down stairs with multiple injuries',
+            'fall from height with leg injuries'
+          ];
+          condition = fallConditions[(validSeed + 4) % fallConditions.length];
+        } else if (scenarioType.includes('assault')) {
+          const assaultConditions = [
+            'assault victim with head injury',
+            'beaten with object causing facial injuries',
+            'physical altercation with chest trauma',
+            'attack resulting in multiple injuries'
+          ];
+          condition = assaultConditions[(validSeed + 4) % assaultConditions.length];
+        } else {
+          // General trauma conditions
+          const traumaConditions = [
+            'motor vehicle collision with chest pain',
+            'sports injury with shoulder pain',
+            'fall with possible leg fracture',
+            'accident with multiple injuries',
+            'bicycle accident with road rash',
+            'workplace injury with back pain',
+            'construction accident with leg pain'
+          ];
+          condition = traumaConditions[(validSeed + 4) % traumaConditions.length];
+        }
       } else if (scenarioType.includes('neurological')) {
         const neuroConditions = [
           'sudden weakness on one side',

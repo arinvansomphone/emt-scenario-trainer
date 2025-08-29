@@ -4,21 +4,23 @@ class VitalsProcessor {
   detectVitalsRequest(message) {
     const normalizedMessage = TextNormalizer.normalizeToAsciiLower(message);
     
-    // Check if it's a general vitals request without specifics
-    const isGeneralVitalsRequest = /full set|all vitals|complete set|vital signs/.test(normalizedMessage);
-    
     // Check for specific vitals mentioned
     const specificVitals = {
       isPulseOx: /(pulse ox|oxygen saturation|saturation|spo2|sp02|finger probe|pulse oximeter|oximeter)/.test(normalizedMessage),
-      isHeartRate: /heart rate|pulse|hr/.test(normalizedMessage),
-      isRespRate: /respiratory rate|breathing rate|rr/.test(normalizedMessage),
-      isBloodPressure: /blood pressure|bp/.test(normalizedMessage),
-      isTemperature: /temp|temperature/.test(normalizedMessage)
+      isHeartRate: /(heart rate|pulse|hr)\b/.test(normalizedMessage),
+      isRespRate: /(respiratory rate|breathing rate|rr)\b/.test(normalizedMessage),
+      isBloodPressure: /(blood pressure|bp)\b/.test(normalizedMessage),
+      isTemperature: /(temp|temperature)\b/.test(normalizedMessage)
     };
     
-    // If it's a general request but no specific vitals are mentioned, we need specification
+    // Check if any specific vitals are mentioned
     const hasSpecificVitals = Object.values(specificVitals).some(v => v);
-    const needsSpecification = isGeneralVitalsRequest && !hasSpecificVitals;
+    
+    // Check if it's a general vitals request without specifics
+    const isGeneralVitalsRequest = /(full set|all vitals|complete set|vital signs|vitals)\b/.test(normalizedMessage) && !hasSpecificVitals;
+    
+    // Only need specification if it's a general request with no specific vitals mentioned
+    const needsSpecification = isGeneralVitalsRequest;
     
     return {
       ...specificVitals,

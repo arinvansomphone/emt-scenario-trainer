@@ -98,7 +98,7 @@ export default function SelectionScreen() {
   };
 
   return (
-    <div style={{ height: '100vh', background: 'linear-gradient(135deg, #FFF0F6 0%, #F5F0FF 100%)', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ height: '100vh', background: '#1e3a8a', display: 'flex', flexDirection: 'column' }}>
       <Header />
       <div style={{ 
         flex: 1,

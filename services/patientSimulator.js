@@ -519,6 +519,57 @@ class PatientSimulator {
   }
 
   /**
+   * Update vitals based on time progression and interventions
+   */
+  updateVitals() {
+    if (!this.scenarioStartTime) return;
+    
+    const elapsedMinutes = this.getElapsedTime();
+    const updatedVitals = this.calculateVitalsProgression(elapsedMinutes);
+    
+    this.vitalsHistory.push({
+      timestamp: Date.now(),
+      vitals: updatedVitals,
+      elapsedTime: elapsedMinutes
+    });
+    
+    console.log('📊 Vitals updated:', updatedVitals);
+  }
+
+  /**
+   * Update consciousness level based on condition and interventions
+   */
+  updateConsciousness() {
+    if (!this.scenarioStartTime) return;
+    
+    const currentVitals = this.getCurrentVitals();
+    const elapsedMinutes = this.getElapsedTime();
+    
+    // Determine consciousness based on vitals and time
+    if (currentVitals.spO2 < 80 || currentVitals.systolic < 80) {
+      this.consciousnessLevel = 'altered';
+    } else if (currentVitals.spO2 < 70 || currentVitals.systolic < 70) {
+      this.consciousnessLevel = 'unconscious';
+    } else if (elapsedMinutes > 10 && this.interventionsPerformed.length === 0) {
+      this.consciousnessLevel = 'altered'; // Deterioration without treatment
+    } else {
+      this.consciousnessLevel = 'alert';
+    }
+    
+    console.log('🧠 Consciousness updated:', this.consciousnessLevel);
+  }
+
+  /**
+   * Check if scenario should end
+   */
+  shouldEndScenario() {
+    if (!this.scenarioStartTime) return false;
+    
+    const elapsedMinutes = this.getElapsedTime();
+    return elapsedMinutes >= 15; // 15-minute time limit
+  }
+
+  /**
    * Reset the patient simulator for a new scenario
    */
   reset() {

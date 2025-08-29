@@ -730,18 +730,23 @@ class ChatService {
       if (vitalsRequest.isHeartRate || vitalsRequest.isBloodPressure || vitalsRequest.isRespRate || 
           vitalsRequest.isTemperature || vitalsRequest.isPulseOx) {
         
-        let vitalType = '';
-        if (vitalsRequest.isHeartRate) vitalType = 'heart rate';
-        else if (vitalsRequest.isBloodPressure) vitalType = 'blood pressure';
-        else if (vitalsRequest.isRespRate) vitalType = 'respiratory rate';
-        else if (vitalsRequest.isTemperature) vitalType = 'temperature';
-        else if (vitalsRequest.isPulseOx) vitalType = 'oxygen saturation';
+        // Collect all requested vitals
+        const requestedVitals = [];
+        if (vitalsRequest.isHeartRate) requestedVitals.push('heart rate');
+        if (vitalsRequest.isBloodPressure) requestedVitals.push('blood pressure');
+        if (vitalsRequest.isRespRate) requestedVitals.push('respiratory rate');
+        if (vitalsRequest.isTemperature) requestedVitals.push('temperature');
+        if (vitalsRequest.isPulseOx) requestedVitals.push('oxygen saturation');
         
-        const vitalResponse = this.patientSimulator.getSpecificVital(vitalType);
+        // Get all requested vitals
+        const vitalResponses = requestedVitals.map(vitalType => 
+          this.patientSimulator.getSpecificVital(vitalType)
+        );
+        
         const patientResponse = this.patientSimulator.generatePatientResponse(userMessage, scenarioData);
         
         return {
-          response: `${patientResponse}\n\n${vitalResponse}\n\nAwaiting your next step.`,
+          response: `${patientResponse}\n\n${vitalResponses.join('\n')}\n\nAwaiting your next step.`,
           additionalMessages: [],
           enhancedScenarioData: scenarioData
         };
@@ -828,37 +833,47 @@ class ChatService {
       }
     }
 
-    // Handle active scenario interactions
-    if (this.currentScenarioActive) {
-      console.log('🏥 Active scenario - processing user action...');
+    // Handle active scenario interactions OR conversation during any scenario
+    let additionalContext = null;
+    if (this.currentScenarioActive || (scenarioData?.generatedScenario && this.isPatientConversation(userMessage))) {
+      console.log('🏥 Processing user interaction...', { 
+        scenarioActive: this.currentScenarioActive, 
+        hasScenario: !!scenarioData?.generatedScenario,
+        isConversation: this.isPatientConversation(userMessage)
+      });
       
-      // Check if scenario should end (timeout or handover)
-      const shouldEnd = this.patientSimulator.shouldEndScenario();
-      const isHandover = this.isHandoverReport(userMessage);
-      
-      if (shouldEnd || isHandover) {
-        console.log('🏁 Scenario ending...', { shouldEnd, isHandover });
-        this.currentScenarioActive = false;
-        this.scenarioEndReason = shouldEnd ? 'timeout' : 'handover';
-        
-        // Generate performance summary
-        const performanceSummary = await this.generatePerformanceSummary(scenarioData);
-        return {
-          response: performanceSummary,
-          additionalMessages: [],
-          enhancedScenarioData: scenarioData
-        };
+      // Check if scenario should end (timeout or handover) - only if scenario is actually active
+      if (this.currentScenarioActive) {
+        const shouldEnd = this.patientSimulator.shouldEndScenario();
+        const isHandover = this.isHandoverReport(userMessage);
+        if (shouldEnd || isHandover) {
+          console.log('🏁 Scenario ending...', { shouldEnd, isHandover });
+          this.currentScenarioActive = false;
+          this.scenarioEndReason = shouldEnd ? 'timeout' : 'handover';
+          
+          // Generate performance summary
+          const performanceSummary = await this.generatePerformanceSummary(scenarioData);
+          return {
+            response: performanceSummary,
+            additionalMessages: [],
+            enhancedScenarioData: scenarioData
+          };
+        }
       }
       
-      // Log user action for evaluation
-      this.performanceEvaluator.logAction(userMessage);
+      // Log user action for evaluation (only if scenario is active)
+      if (this.currentScenarioActive) {
+        this.performanceEvaluator.logAction(userMessage);
+      }
       
       // Check if this is just conversation/introduction (not a medical action)
       const isConversation = this.isPatientConversation(userMessage);
+      console.log('🔍 Conversation check:', { userMessage, isConversation });
       
       if (isConversation) {
         // Handle as natural patient conversation - no action recognition needed
-        console.log('💬 Handling as patient conversation');
+        console.log('💬 Handling as patient conversation - skipping action recognition');
+        additionalContext = 'PATIENT_CONVERSATION: Respond naturally as the patient to this introduction/conversation';
       } else {
         // Recognize and process user action
         const actionResult = this.actionRecognizer.recognizeAction(userMessage);
@@ -1118,15 +1133,26 @@ RESPONSE GUIDELINES:
 49. For physical exams: React appropriately to being touched, examined, or having equipment used
 50. Cooperate with medical procedures unless your condition prevents it
 
+CONVERSATION AND INTRODUCTION HANDLING:
+51. When EMT introduces themselves: Respond naturally as the patient would, acknowledging their presence
+52. When EMT says "Hi" or greets you: Respond with appropriate patient greeting based on your condition
+53. When EMT asks "what's the problem": Describe your chief complaint and current symptoms
+54. NEVER ask for clarification on introductions, greetings, or basic conversation
+55. Always respond in character as the patient, even for simple interactions
+56. Example responses to "Hi I'm John, I'm an EMT":
+    - Alert patient: "Oh thank goodness you're here! I'm really worried about..."
+    - Anxious patient: "Please help me, I don't know what's happening..."
+    - Confused patient: "Who... who are you? I'm so confused..."
+
 SCENARIO EVOLUTION:
-51. Show natural progression of your condition based on time and interventions
-52. If critical interventions are delayed: Show gradual deterioration (increased symptoms, decreased cooperation)
-53. If appropriate interventions are given: Show improvement (decreased symptoms, increased cooperation)
-54. If inappropriate interventions are given: Show no improvement or slight worsening
-55. Show complications if critical interventions are missed (e.g., cardiac arrest if aspirin delayed for chest pain)
-56. Respond to intervention quality - better technique = better results
-57. Show realistic time-based changes (condition may worsen if untreated for too long)
-58. Maintain consistency with your initial presentation and medical condition
+57. Show natural progression of your condition based on time and interventions
+58. If critical interventions are delayed: Show gradual deterioration (increased symptoms, decreased cooperation)
+59. If appropriate interventions are given: Show improvement (decreased symptoms, increased cooperation)
+60. If inappropriate interventions are given: Show no improvement or slight worsening
+61. Show complications if critical interventions are missed (e.g., cardiac arrest if aspirin delayed for chest pain)
+62. Respond to intervention quality - better technique = better results
+63. Show realistic time-based changes (condition may worsen if untreated for too long)
+64. Maintain consistency with your initial presentation and medical condition
 
 VITAL SIGNS GENERATION:
 59. Generate realistic vital signs based on your medical condition and scenario type
@@ -1412,7 +1438,11 @@ Format as JSON with keys: assessment, strengths, improvements, recommendations, 
       /\bwhere\s+does\s+it\s+hurt/,
       /\bwhat\s+does\s+the\s+pain\s+feel\s+like/,
       /\bon\s+a\s+scale\s+of/,
-      /\brate\s+your\s+pain/
+      /\brate\s+your\s+pain/,
+      /\bwhat\s+seems\s+to\s+be\s+the\s+problem/,
+      /\bwhat'?s\s+the\s+problem/,
+      /\bwhat'?s\s+going\s+on/,
+      /\bwhat'?s\s+wrong/
     ];
     
     // Check if it matches conversation patterns

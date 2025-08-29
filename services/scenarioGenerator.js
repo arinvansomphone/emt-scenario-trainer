@@ -78,6 +78,32 @@ class ScenarioGenerator {
   }
 
   /**
+   * Get scenario type enforcement string to ensure proper category matching
+   * @param {string} subScenario - The selected sub-scenario
+   * @returns {string} - Enforcement description
+   */
+  getScenarioTypeEnforcement(subScenario) {
+    const traumaScenarios = [
+      'MVC Scenario', 'Fall Scenario', 'Assault Scenario', 'Sport Injury Scenario',
+      'Stabbing Scenario', 'GSW Scenario', 'Burn Scenario', 'Trauma Scenario'
+    ];
+    
+    const medicalScenarios = [
+      'Respiratory Scenario', 'Cardiac Scenario', 'Neurologic Scenario', 
+      'Metabolic Scenario', 'Abdominal Scenario', 'Environmental Scenario',
+      'OB/GYN Scenario', 'Medical Scenario'
+    ];
+
+    if (traumaScenarios.includes(subScenario)) {
+      return 'TRAUMA/INJURY scenario with a specific mechanism of injury (fall, collision, assault, etc.)';
+    } else if (medicalScenarios.includes(subScenario)) {
+      return 'MEDICAL scenario with illness/disease process (NOT trauma or injury)';
+    } else {
+      return 'medical or trauma scenario as appropriate';
+    }
+  }
+
+  /**
    * Build the prompt for comprehensive scenario generation
    * @param {Object} scenarioData - Basic scenario requirements
    * @param {Object} difficulty - Difficulty configuration
@@ -98,6 +124,11 @@ class ScenarioGenerator {
     const { mainScenario, subScenario, sunetId } = scenarioData;
 
     const systemPrompt = `You are an expert EMT instructor creating realistic training scenarios. Generate a comprehensive, medically accurate EMT scenario that includes all necessary details for training.
+
+🚨 SCENARIO CATEGORY ENFORCEMENT 🚨
+- If the user requests a TRAUMA scenario (MVC, Fall, Assault, Sport Injury, Stabbing, GSW, Burn), you MUST create a trauma scenario with physical injuries from external mechanisms
+- If the user requests a MEDICAL scenario (Cardiac, Respiratory, Neurologic, Metabolic, Abdominal, Environmental, OB/GYN), you MUST create a medical scenario with illness/disease processes
+- NEVER mix categories - trauma scenarios cannot have medical conditions as primary issues, medical scenarios cannot have trauma as primary issues
 
 CRITICAL: Return your response as a valid JSON object with the exact structure shown below. Do not include any text before or after the JSON.
 
@@ -183,7 +214,15 @@ Required JSON structure:
     ];
     const selectedLocation = locationTypes[Math.floor(Math.random() * locationTypes.length)];
     
-    const userPrompt = `Create a realistic ${subScenario} scenario for EMT training. This should be a ${mainScenario.toLowerCase()} case.
+    const userPrompt = `Create a realistic ${subScenario} scenario for EMT training. 
+
+🚨 MANDATORY REQUIREMENT: This MUST be a ${this.getScenarioTypeEnforcement(subScenario)} case.
+🚨 REJECT any medical illness scenarios if this is a trauma scenario.
+🚨 REJECT any trauma/injury scenarios if this is a medical scenario.
+
+${subScenario === 'MVC Scenario' ? '🚗 MVC SCENARIO REQUIREMENTS: Must involve a motor vehicle collision/crash with resulting injuries. Examples: car vs car, car vs tree, rollover, pedestrian vs vehicle.' : ''}
+${subScenario.includes('Trauma') || ['MVC Scenario', 'Fall Scenario', 'Assault Scenario', 'Sport Injury Scenario', 'Stabbing Scenario', 'GSW Scenario', 'Burn Scenario'].includes(subScenario) ? '⚠️ TRAUMA SCENARIO: Patient must have sustained physical injuries from an external mechanism. NO illness, disease, or medical conditions.' : ''}
+${subScenario.includes('Medical') || ['Respiratory Scenario', 'Cardiac Scenario', 'Neurologic Scenario', 'Metabolic Scenario', 'Abdominal Scenario', 'Environmental Scenario', 'OB/GYN Scenario'].includes(subScenario) ? '🏥 MEDICAL SCENARIO: Patient must have illness/disease process. NO trauma, injuries, or external mechanisms.' : ''}
 
 DIFFICULTY LEVEL: ${difficulty.name.toUpperCase()} (${difficulty.description})
 
@@ -205,6 +244,7 @@ Requirements:
 - Include proper transport decision criteria
 - IMPORTANT: Create VARIED and UNIQUE scenario details that differ from standard textbook examples
 - CRITICAL: Generate a specific time of day (e.g., "2:15 PM", "10:30 AM") - do NOT use placeholders
+- ABSOLUTELY CRITICAL: The scenario MUST match the selected category - ${this.getScenarioTypeEnforcement(subScenario)}
 
 DISPATCH INFORMATION GUIDELINES - CRITICAL:
 - ALWAYS include specific mechanism of injury OR observable symptoms in the dispatch
@@ -217,21 +257,34 @@ DISPATCH INFORMATION GUIDELINES - CRITICAL:
 - The mechanism field must give EMTs useful information to prepare for the call WITHOUT giving away the diagnosis
 - Focus only on immediate, observable symptoms or mechanism of current incident
 
-Examples of EXCELLENT dispatch reasons (ALL SCENARIO TYPES):
-  * TRAUMA: "fell from ladder, back pain"
-  * TRAUMA: "motor vehicle collision, chest pain"
-  * TRAUMA: "stabbed in abdomen, conscious"
-  * TRAUMA: "fall from roof, leg pain"
-  * TRAUMA: "bicycle accident, head injury"
-  * MEDICAL CARDIAC: "chest pain and shortness of breath"
-  * MEDICAL RESPIRATORY: "difficulty breathing"
-  * MEDICAL NEUROLOGIC: "sudden weakness on one side"
-  * MEDICAL METABOLIC: "confusion and dizziness"
-  * MEDICAL ALLERGIC: "difficulty breathing after bee sting"
-  * MEDICAL OVERDOSE: "unconscious, found by family"
-  * MEDICAL GI: "vomiting blood"
-  * MEDICAL SEIZURE: "seizure, now awake"
-  * MEDICAL PSYCHIATRIC: "agitated and confused"
+Examples of EXCELLENT dispatch reasons by SCENARIO TYPE:
+
+TRAUMA SCENARIOS - MANDATORY DISPATCH FORMATS (MVC, Fall, Assault, Sport Injury, Stabbing, GSW, Burn):
+  * MVC: "motor vehicle collision, chest pain" | "car accident, leg pain" | "collision on highway, back pain" | "vehicle rollover, head injury"
+  * FALL: "fell from ladder, back pain" | "fall from roof, leg pain" | "fell down stairs, hip pain"
+  * ASSAULT: "stabbed in abdomen, conscious" | "assault victim, head injury" | "beaten with object, arm injury"
+  * SPORT: "bicycle accident, head injury" | "football injury, shoulder pain" | "skiing accident, leg injury"
+  * BURN: "burned in kitchen fire, arm burns" | "house fire victim, face burns" | "chemical burn, hand injury"
+  * GSW: "gunshot wound to leg, conscious" | "shooting victim, chest wound" | "gunshot to arm, alert"
+
+⚠️ TRAUMA DISPATCH RULE: ALL trauma dispatches MUST include mechanism of injury (collision, fall, stabbing, etc.) + resulting pain/injury location.
+
+MEDICAL SCENARIOS (Cardiac, Respiratory, Neurologic, Metabolic, Abdominal, Environmental, OB/GYN):
+  * CARDIAC: "chest pain and shortness of breath"
+  * CARDIAC: "chest pain, sweating"
+  * RESPIRATORY: "difficulty breathing"
+  * RESPIRATORY: "trouble breathing, wheezing"
+  * NEUROLOGIC: "sudden weakness on one side"
+  * NEUROLOGIC: "confusion and slurred speech"
+  * METABOLIC: "confusion and dizziness"
+  * METABOLIC: "diabetic emergency, unconscious"
+  * ABDOMINAL: "severe stomach pain"
+  * ABDOMINAL: "vomiting blood"
+  * ENVIRONMENTAL: "difficulty breathing after bee sting"
+  * ENVIRONMENTAL: "heat exhaustion, dizzy"
+  * OB/GYN: "pregnant woman, contractions"
+  * SEIZURE: "seizure, now awake"
+  * OVERDOSE: "unconscious, found by family"
 
 Examples of BAD dispatch (avoid these - TOO DETAILED):
   * "chest pain radiating to left arm with nausea" - TOO MUCH DETAIL
