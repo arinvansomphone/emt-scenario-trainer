@@ -9,30 +9,35 @@ The EMT Scenario Trainer is an advanced simulation platform that creates dynamic
 ## ✨ Features
 
 ### 🎭 Dynamic Scenario Generation
+
 - **Trauma Scenarios**: MVC, Falls, Assaults, Sport Injuries, Stabbings, GSW, Burns
 - **Medical Scenarios**: Cardiac, Respiratory, Neurological, Metabolic, Obstetric, Pediatric
 - **Environmental Factors**: Weather conditions, lighting, noise levels, bystander presence
 - **Adaptive Difficulty**: Scenarios adjust based on student performance
 
 ### 🤖 AI-Powered Patient Simulation
+
 - **Realistic Patient Responses**: Dynamic vital signs, symptoms, and condition changes
 - **Interactive Communication**: Natural language patient interactions
 - **Vital Sign Monitoring**: Real-time SpO2, blood pressure, heart rate, respiratory rate
 - **Condition Progression**: Patient status evolves based on interventions
 
 ### 📊 Performance Evaluation
+
 - **Assessment Rubrics**: Stanford EMT Medical and Trauma Assessment criteria
 - **Real-time Feedback**: Immediate evaluation of assessment quality
 - **Progress Tracking**: Detailed performance analytics and improvement suggestions
 - **Competency Mapping**: Skills assessment across multiple domains
 
 ### 🌍 Environmental & Bystander Management
+
 - **Dynamic Environments**: Changing weather, lighting, and scene conditions
 - **Bystander Interactions**: Realistic witness statements and interference
 - **Scene Safety**: Environmental hazards and safety considerations
 - **Resource Management**: Limited equipment and personnel scenarios
 
 ### 💬 Interactive Communication
+
 - **Natural Language Processing**: Voice and text input recognition
 - **Multi-modal Input**: Speech-to-text and keyboard input support
 - **Context-Aware Responses**: Intelligent scenario progression
@@ -40,45 +45,21 @@ The EMT Scenario Trainer is an advanced simulation platform that creates dynamic
 
 ## 🚀 Usage
 
-### Starting the Application
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/arinvansomphone/emt-scenario-trainer.git
-   cd emt-scenario-trainer
-   ```
-
-2. **Install dependencies**
-   ```bash
-   npm install
-   ```
-
-3. **Set up environment variables**
-   Create a `.env` file in the root directory:
-   ```env
-   OPENAI_API_KEY=your_openai_api_key_here
-   ```
-
-4. **Start the development servers**
-   ```bash
-   npm run dev:all
-   ```
-
-5. **Access the application**
-   - Frontend: http://localhost:5173
-   - Backend API: http://localhost:3000
-
 ### Using the Scenario Trainer
 
 1. **Select a Scenario Type**
+
    - Choose from Trauma or Medical scenarios
    - Select specific subcategories (MVC, Cardiac, etc.)
 
 2. **Begin Assessment**
+
    - Follow standard EMT assessment protocols
    - Interact with the AI patient through natural language
    - Monitor vital signs and patient responses
 
 3. **Receive Feedback**
+
    - Get real-time performance evaluation
    - Review assessment quality scores
    - Identify areas for improvement
