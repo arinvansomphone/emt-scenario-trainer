@@ -2,6 +2,8 @@
 
 A comprehensive AI-powered training platform for Emergency Medical Technicians (EMTs) that provides realistic, interactive scenario-based learning experiences.
 
+**🌐 Live Demo**: [https://arinvansomphone.github.io/emt-scenario-trainer/](https://arinvansomphone.github.io/emt-scenario-trainer/)
+
 ## 🚑 Overview
 
 The EMT Scenario Trainer is an advanced simulation platform that creates dynamic, medically accurate training scenarios for EMT students and professionals. Using AI-powered patient simulation, the system provides realistic emergency scenarios with adaptive patient responses, vital sign monitoring, and performance evaluation.
