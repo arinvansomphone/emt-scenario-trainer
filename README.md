@@ -9,181 +9,81 @@ The EMT Scenario Trainer is an advanced simulation platform that creates dynamic
 ## ✨ Features
 
 ### 🎭 Dynamic Scenario Generation
-
 - **Trauma Scenarios**: MVC, Falls, Assaults, Sport Injuries, Stabbings, GSW, Burns
-- **Medical Scenarios**: Cardiac, Respiratory, Neurological, Metabolic, Abdominal, Environmental, OB/GYN
-- **Realistic Dispatch Information**: Location-specific, time-accurate, detailed mechanism descriptions
-- **Category Enforcement**: Ensures proper scenario categorization (trauma vs medical)
+- **Medical Scenarios**: Cardiac, Respiratory, Neurological, Metabolic, Obstetric, Pediatric
+- **Environmental Factors**: Weather conditions, lighting, noise levels, bystander presence
+- **Adaptive Difficulty**: Scenarios adjust based on student performance
 
 ### 🤖 AI-Powered Patient Simulation
-
-- **Adaptive Patient Responses**: Realistic patient reactions to EMT interventions
-- **Dynamic Vital Signs**: Time-progressive vital sign changes based on interventions
-- **Consciousness Management**: Patient alertness changes throughout scenarios
-- **Intervention Tracking**: Records and responds to EMT actions and treatments
+- **Realistic Patient Responses**: Dynamic vital signs, symptoms, and condition changes
+- **Interactive Communication**: Natural language patient interactions
+- **Vital Sign Monitoring**: Real-time SpO2, blood pressure, heart rate, respiratory rate
+- **Condition Progression**: Patient status evolves based on interventions
 
 ### 📊 Performance Evaluation
-
-- **Real-time Assessment**: Tracks EMT actions and decision-making
-- **Comprehensive Scoring**: Evaluates multiple performance aspects
-- **Detailed Feedback**: Provides strengths and areas for improvement
-- **Scenario Completion Reports**: Summary of performance and time management
+- **Assessment Rubrics**: Stanford EMT Medical and Trauma Assessment criteria
+- **Real-time Feedback**: Immediate evaluation of assessment quality
+- **Progress Tracking**: Detailed performance analytics and improvement suggestions
+- **Competency Mapping**: Skills assessment across multiple domains
 
 ### 🌍 Environmental & Bystander Management
-
-- **Scene Realism**: Environmental factors affecting patient presentation
-- **Bystander Interactions**: Realistic bystander responses and information
-- **Dynamic Scene Evolution**: Changing conditions throughout scenarios
+- **Dynamic Environments**: Changing weather, lighting, and scene conditions
+- **Bystander Interactions**: Realistic witness statements and interference
+- **Scene Safety**: Environmental hazards and safety considerations
+- **Resource Management**: Limited equipment and personnel scenarios
 
 ### 💬 Interactive Communication
+- **Natural Language Processing**: Voice and text input recognition
+- **Multi-modal Input**: Speech-to-text and keyboard input support
+- **Context-Aware Responses**: Intelligent scenario progression
+- **Real-time Adaptation**: Dynamic scenario adjustments
 
-- **Voice Input Support**: Practice verbal communication skills
-- **Natural Language Processing**: Understands EMT commands and questions
-- **Contextual Responses**: Patient and bystander responses based on scenario context
+## 🚀 Usage
 
-## 🛠️ Technology Stack
-
-### Frontend
-
-- **React 19** - Modern UI framework
-- **Vite** - Fast build tool and development server
-- **React Router DOM** - Client-side routing
-- **CSS3** - Styling with modern design principles
-
-### Backend
-
-- **Node.js** - Server runtime
-- **Express.js** - Web framework
-- **OpenAI GPT-4o-mini** - AI scenario generation and patient simulation
-- **PDF Processing** - Knowledge base integration from medical documents
-
-### Development Tools
-
-- **Nodemon** - Auto-restart development server
-- **ESLint** - Code quality and consistency
-- **Concurrently** - Run frontend and backend simultaneously
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-- Node.js (v18 or higher)
-- npm or yarn
-- OpenAI API key
-
-### Installation
-
+### Starting the Application
 1. **Clone the repository**
-
    ```bash
    git clone https://github.com/arinvansomphone/emt-scenario-trainer.git
    cd emt-scenario-trainer
    ```
 
 2. **Install dependencies**
-
    ```bash
    npm install
    ```
 
-3. **Environment Setup**
+3. **Set up environment variables**
    Create a `.env` file in the root directory:
-
    ```env
    OPENAI_API_KEY=your_openai_api_key_here
-   PORT=3000
-   NODE_ENV=development
    ```
 
-4. **Start the application**
-
+4. **Start the development servers**
    ```bash
-   # Start both frontend and backend
    npm run dev:all
-
-   # Or start individually:
-   npm run dev:backend    # Backend only (port 3000)
-   npm run dev:frontend   # Frontend only (port 5173)
    ```
 
 5. **Access the application**
    - Frontend: http://localhost:5173
    - Backend API: http://localhost:3000
 
-## 📖 Usage
+### Using the Scenario Trainer
 
-### Starting a Scenario
+1. **Select a Scenario Type**
+   - Choose from Trauma or Medical scenarios
+   - Select specific subcategories (MVC, Cardiac, etc.)
 
-1. Select a scenario type from the main menu
-2. Choose a specific sub-scenario (e.g., MVC, Cardiac, etc.)
-3. Review the dispatch information
-4. Click "Ready to Begin" to start the simulation
+2. **Begin Assessment**
+   - Follow standard EMT assessment protocols
+   - Interact with the AI patient through natural language
+   - Monitor vital signs and patient responses
 
-### During Simulation
+3. **Receive Feedback**
+   - Get real-time performance evaluation
+   - Review assessment quality scores
+   - Identify areas for improvement
 
-- **Communicate naturally** with the patient and bystanders
-- **Perform assessments** using standard EMT protocols
-- **Monitor vital signs** and patient responses
-- **Make treatment decisions** based on findings
-- **Use voice input** for realistic communication practice
-
-### Scenario Completion
-
-- Receive comprehensive performance evaluation
-- Review strengths and areas for improvement
-- Get detailed feedback on decision-making and interventions
-
-## 🏗️ Project Structure
-
-```
-emt-chatbot/
-├── src/                    # React frontend components
-├── services/              # Backend business logic
-│   ├── chatService.js     # Main chat and scenario logic
-│   ├── scenarioGenerator.js # AI scenario generation
-│   ├── patientSimulator.js # Patient simulation engine
-│   ├── processors/        # Data processing modules
-│   └── utils/            # Utility functions
-├── routes/               # Express API routes
-├── config/              # Configuration files
-├── knowledge/           # Medical knowledge base
-└── public/             # Static assets
-```
-
-## 🔧 Development
-
-### Available Scripts
-
-- `npm run dev:all` - Start both frontend and backend
-- `npm run dev:backend` - Start backend only
-- `npm run dev:frontend` - Start frontend only
-- `npm run build` - Build for production
-- `npm run lint` - Run ESLint
-- `npm run preview` - Preview production build
-
-### Key Components
-
-- **Scenario Generation**: AI-powered creation of realistic emergency scenarios
-- **Patient Simulation**: Dynamic patient responses and vital sign management
-- **Performance Evaluation**: Real-time assessment of EMT performance
-- **Environmental Management**: Scene realism and bystander interactions
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## 📝 License
-
-This project is licensed under the ISC License.
-
-## 🆘 Support
-
-For support, please open an issue in the GitHub repository or contact the development team.
-
----
-
-**Built with ❤️ for EMT education and training**
+4. **Practice and Improve**
+   - Repeat scenarios with different variations
+   - Track progress over time
+   - Master assessment techniques
