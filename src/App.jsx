@@ -52,6 +52,7 @@ export default function App() {
   const recognitionRef = useRef(null);
   const [micLevel, setMicLevel] = useState(0);
   const inputRef = useRef(null);
+  const [backendConnected, setBackendConnected] = useState(true); // Track backend connection
 
   const scrollToBottom = () => {
     if (messagesEndRef.current) {
@@ -365,6 +366,84 @@ export default function App() {
       await sendMessageToAPI(messageText);
     }
   };
+
+  // Check backend connection on component mount
+  useEffect(() => {
+    const checkBackendConnection = async () => {
+      try {
+        const response = await fetch(`${config.apiBaseUrl}/health`, { 
+          method: 'GET',
+          timeout: 5000 
+        });
+        setBackendConnected(response.ok);
+      } catch (error) {
+        console.log('Backend not available:', error);
+        setBackendConnected(false);
+      }
+    };
+    
+    checkBackendConnection();
+  }, []);
+
+  // Show fallback UI if backend is not connected
+  if (!backendConnected && config.isProduction) {
+    return (
+      <div style={{
+        minHeight: '100vh',
+        background: '#1e3a8a',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '2rem',
+        color: 'white',
+        textAlign: 'center'
+      }}>
+        <div style={{
+          backgroundColor: 'rgba(255, 255, 255, 0.1)',
+          borderRadius: '20px',
+          padding: '3rem',
+          maxWidth: '600px',
+          backdropFilter: 'blur(10px)'
+        }}>
+          <h1 style={{ marginBottom: '1rem', fontSize: '2rem' }}>🚑 EMT Scenario Trainer</h1>
+          <p style={{ marginBottom: '2rem', fontSize: '1.1rem', opacity: 0.9 }}>
+            Welcome to the EMT Scenario Trainer! This is a comprehensive AI-powered training platform for Emergency Medical Technicians.
+          </p>
+          <div style={{
+            backgroundColor: 'rgba(255, 255, 255, 0.1)',
+            borderRadius: '15px',
+            padding: '2rem',
+            marginBottom: '2rem'
+          }}>
+            <h3 style={{ marginBottom: '1rem', color: '#ffd700' }}>⚠️ Backend Service Unavailable</h3>
+            <p style={{ marginBottom: '1rem' }}>
+              The backend service is currently not deployed. To use the full functionality:
+            </p>
+            <ul style={{ textAlign: 'left', marginBottom: '1rem' }}>
+              <li>Deploy the backend to a cloud service (Render, Heroku, etc.)</li>
+              <li>Update the API URL in <code>src/config.js</code></li>
+              <li>Or run the application locally with <code>npm run dev:all</code></li>
+            </ul>
+          </div>
+          <div style={{
+            backgroundColor: 'rgba(255, 255, 255, 0.1)',
+            borderRadius: '15px',
+            padding: '2rem'
+          }}>
+            <h3 style={{ marginBottom: '1rem', color: '#90EE90' }}>✨ Features Available</h3>
+            <ul style={{ textAlign: 'left' }}>
+              <li>Dynamic scenario generation (MVC, Cardiac, Trauma, etc.)</li>
+              <li>AI-powered patient simulation</li>
+              <li>Real-time performance evaluation</li>
+              <li>Voice and text input support</li>
+              <li>Environmental and bystander management</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{

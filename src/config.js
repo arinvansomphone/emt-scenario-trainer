@@ -2,7 +2,7 @@
 const config = {
   // API base URL - changes based on environment
   apiBaseUrl: process.env.NODE_ENV === 'production' 
-    ? 'https://your-backend-url.com/api'  // Replace with your deployed backend URL
+    ? 'http://localhost:3000/api'  // Temporarily use localhost until backend is deployed
     : 'http://localhost:3000/api',
   
   // Environment detection
@@ -11,6 +11,9 @@ const config = {
   
   // GitHub Pages base path
   basePath: process.env.NODE_ENV === 'production' ? '/emt-scenario-trainer' : '',
+  
+  // Backend deployment status
+  backendDeployed: false, // Set to true when backend is deployed
 };
 
 export default config;
