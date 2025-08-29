@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import config from './config';
 
 export default function TestConnection() {
   const [testResult, setTestResult] = useState('');
@@ -7,7 +8,7 @@ export default function TestConnection() {
   const testAPI = async () => {
     setIsTesting(true);
     try {
-      const response = await fetch('http://localhost:3000/api/chat', {
+      const response = await fetch(`${config.apiBaseUrl}/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

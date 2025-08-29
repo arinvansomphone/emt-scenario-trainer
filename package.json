@@ -13,7 +13,8 @@
     "dev:all": "concurrently -k -n backend,frontend \"nodemon server.js\" \"vite\"",
     "dev:backend": "nodemon server.js",
     "start:backend": "node server.js",
-    "start:frontend": "vite preview"
+    "start:frontend": "vite preview",
+    "deploy": "npm run build && gh-pages -d dist"
   },
   "dependencies": {
     "cors": "^2.8.5",

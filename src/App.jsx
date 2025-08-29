@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import Header from './Header';
+import config from './config';
 
 const RobotAvatar = () => (
   <div style={{
@@ -133,7 +134,7 @@ export default function App() {
     try {
       setIsLoading(true);
 
-      const response = await fetch('http://localhost:3000/api/chat', {
+      const response = await fetch(`${config.apiBaseUrl}/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -306,7 +307,7 @@ export default function App() {
             reader.readAsDataURL(blob);
           });
 
-          const resp = await fetch('http://localhost:3000/api/transcribe', {
+          const resp = await fetch(`${config.apiBaseUrl}/transcribe`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ audio: `data:audio/webm;base64,${base64}` })
