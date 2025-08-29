@@ -1,0 +1,69 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment Variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Operating System Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# Editor Files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Runtime Data
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage Directory
+coverage/
+*.lcov
+
+# Build Outputs
+build/
+dist/
+out/
+
+# Temporary Files
+tmp/
+temp/
+.tmp/
+
+# Cache
+.cache/
+.parcel-cache/
+.npm/
+.eslintcache
+
+# Optional npm cache directory
+.npm
+
+# Optional REPL history
+.node_repl_history
