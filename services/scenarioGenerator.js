@@ -125,10 +125,11 @@ class ScenarioGenerator {
 
     const systemPrompt = `You are an expert EMT instructor creating realistic training scenarios. Generate a comprehensive, medically accurate EMT scenario that includes all necessary details for training.
 
-🚨 SCENARIO CATEGORY ENFORCEMENT 🚨
-- If the user requests a TRAUMA scenario (MVC, Fall, Assault, Sport Injury, Stabbing, GSW, Burn), you MUST create a trauma scenario with physical injuries from external mechanisms
-- If the user requests a MEDICAL scenario (Cardiac, Respiratory, Neurologic, Metabolic, Abdominal, Environmental, OB/GYN), you MUST create a medical scenario with illness/disease processes
-- NEVER mix categories - trauma scenarios cannot have medical conditions as primary issues, medical scenarios cannot have trauma as primary issues
+🚨 SCENARIO CATEGORY & SUBCATEGORY ENFORCEMENT 🚨
+- You MUST match BOTH the requested category (medical vs trauma) AND the specific subcategory (e.g., Fall Scenario, Cardiac Scenario). Do not substitute.
+- If TRAUMA (MVC, Fall, Assault, Sport Injury, Stabbing, GSW, Burn), create a trauma scenario with physical injuries from an external mechanism.
+- If MEDICAL (Cardiac, Respiratory, Neurologic, Metabolic, Abdominal, Environmental, OB/GYN), create a medical scenario with an illness/disease process.
+- NEVER mix categories. The primary problem MUST align with the requested subcategory.
 
 CRITICAL: Return your response as a valid JSON object with the exact structure shown below. Do not include any text before or after the JSON.
 

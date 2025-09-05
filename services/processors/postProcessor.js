@@ -1,36 +1,36 @@
 // services/processors/postProcessor.js
 const TextNormalizer = require('../utils/textNormalizer');
 
-// Santa Clara County locations for scenario-aware dispatch generation
+// Santa Clara County locations (no house numbers)
 const SANTA_CLARA_LOCATIONS = {
   residential: [
-    '1425 El Camino Real',
-    '2850 Stevens Creek Blvd',
-    '3456 Homestead Road',
-    '789 Saratoga Avenue',
-    '1234 Winchester Blvd',
-    '567 Meridian Avenue',
-    '890 Bascom Avenue',
-    '2345 Camden Avenue'
+    'residential neighborhood near El Camino Real',
+    'residential neighborhood near Stevens Creek Blvd',
+    'residential neighborhood near Homestead Road',
+    'residential neighborhood near Saratoga Avenue',
+    'residential neighborhood near Winchester Blvd',
+    'residential neighborhood near Meridian Avenue',
+    'residential neighborhood near Bascom Avenue',
+    'residential neighborhood near Camden Avenue'
   ],
   business: [
-    'Westfield Valley Fair Mall',
-    'Santana Row Shopping Center',
+    'Westfield Valley Fair',
+    'Santana Row',
     'Stanford Shopping Center',
     'Great Mall of the Bay Area',
     'San Jose City Hall',
-    'Valley Medical Center',
-    'Cisco Systems Campus',
+    'Valley Medical Center campus',
+    'Cisco Systems campus',
     'Apple Park Visitor Center'
   ],
   public: [
     'Kelley Park',
     'Almaden Lake Park',
-    'Central Park (Santa Clara)',
+    'Central Park in Santa Clara',
     'Guadalupe River Park',
     'Mitchell Park',
     'Raging Waters San Jose',
-    'SAP Center at San Jose',
+    'SAP Center',
     'Levi\'s Stadium parking lot'
   ],
   trauma: [
@@ -41,7 +41,7 @@ const SANTA_CLARA_LOCATIONS = {
     'Almaden Expressway overpass',
     'Santa Clara University athletic field',
     'San Jose State University gym',
-    'Local construction site on Bascom Ave'
+    'construction site on Bascom Avenue'
   ]
 };
 
@@ -54,6 +54,25 @@ const INAPPROPRIATE_PATTERNS = [
 ];
 
 class PostProcessor {
+  /**
+   * Limit symptoms list to at most N items, preserving simple grammar
+   * @param {string} text
+   * @param {number} max
+   * @returns {string}
+   */
+  static limitSymptoms(text, max = 2) {
+    if (!text || typeof text !== 'string') return text;
+    // Normalize conjunctions to commas, then split
+    const normalized = text
+      .replace(/\s*,?\s+and\s+/gi, ', ')
+      .replace(/\s*;\s*/g, ', ');
+    const parts = normalized.split(',').map(s => s.trim()).filter(Boolean);
+    if (parts.length <= max) {
+      return parts.join(', ');
+    }
+    const selected = parts.slice(0, max);
+    return selected.length === 2 ? `${selected[0]} and ${selected[1]}` : selected.join(', ');
+  }
   /**
    * Content filtering for inappropriate content
    * @param {string} text - Text to filter
@@ -148,9 +167,9 @@ class PostProcessor {
    */
   static generateTime(seed = 0) {
     const times = [
-      '8:15 AM', '9:30 AM', '10:45 AM', '11:20 AM', '12:15 PM',
-      '1:30 PM', '2:45 PM', '3:20 PM', '4:35 PM', '5:50 PM',
-      '6:25 PM', '7:40 PM', '8:15 PM', '9:30 PM', '10:45 PM'
+      '8:15am', '9:30am', '10:45am', '11:20am', '12:15pm',
+      '1:30pm', '2:45pm', '3:20pm', '4:35pm', '5:50pm',
+      '6:25pm', '7:40pm', '8:15pm', '9:30pm', '10:45pm'
     ];
     const index = Math.abs(seed) % times.length;
     return times[index];
@@ -247,7 +266,8 @@ class PostProcessor {
     
     // Generate seed if not provided
     if (seed === null) {
-      seed = Date.now() + Math.random() * 1000;
+      // Prefer deterministic seed if provided in scenarioData.meta
+      seed = (scenarioData && scenarioData.meta && scenarioData.meta.seed) ? scenarioData.meta.seed : (Date.now() + Math.random() * 1000);
     }
     
     try {
@@ -269,7 +289,7 @@ class PostProcessor {
       }
       
       // Extract dispatch components for validation
-      const dispatchMatch = dispatch.match(/You have been dispatched to a (\d+) year old (male|female) at ([^,]+), ([^f]+) for (.+?)\./i);
+      const dispatchMatch = dispatch.match(/(?:\*\*Dispatch:\*\*\s*)?You have been dispatched to a (\d+) year[- ]old (male|female) at (.+?) at ((?:1[0-2]|[1-9]):[0-5][0-9](?:am|pm)) for (.+?)\./i);
       if (dispatchMatch) {
         const [, age, gender, location, time, condition] = dispatchMatch;
         
@@ -311,26 +331,36 @@ class PostProcessor {
         console.log('✅ Using template-generated dispatch info');
         const dispatchInfo = scenarioData.dispatchInfo;
         
-        // Extract patient info from scenario data if available
-        let age = 'unknown';
-        let gender = 'unknown';
-        
-        if (scenarioData?.generatedScenario?.patientProfile) {
-          age = scenarioData.generatedScenario.patientProfile.age || 'unknown';
-          gender = scenarioData.generatedScenario.patientProfile.gender || 'unknown';
-        }
-        
-        // Use template-generated dispatch info
+        // Use AI-generated dispatch info (including age and gender)
+        const age = dispatchInfo.age || '45';
+        const gender = dispatchInfo.gender || 'male';
         const location = dispatchInfo.location || '1425 El Camino Real';
-        const time = dispatchInfo.time || '2:30 PM';
-        const mechanism = dispatchInfo.mechanism || 'medical emergency';
+        const time = (dispatchInfo.time || '2:30 PM').toLowerCase().replace(/\s*/g, '');
+        // Determine content: mechanism for trauma, symptoms for medical
+        const mainScenario = (scenarioData?.mainScenario || '').toLowerCase();
+        const subScenario = (scenarioData?.subScenario || '').toLowerCase();
+        const isTrauma = /mvc|fall|assault|stabbing|gsw|burn|trauma/.test(subScenario) || /trauma/.test(mainScenario);
+        let content = isTrauma ? (dispatchInfo.mechanism || dispatchInfo.symptoms || 'injury with pain') : (dispatchInfo.symptoms || dispatchInfo.mechanism || 'medical symptoms');
+        if (!isTrauma) {
+          content = this.limitSymptoms(content, 2);
+        }
         const callerInfo = dispatchInfo.callerInfo || 'bystander on scene';
         
-        // Build dispatch message using template data
-        let dispatchMessage = `**Dispatch Information:** You have been dispatched to a ${age} year old ${gender} at ${location}, ${time} for ${mechanism}. ${callerInfo}.`;
+        // Build dispatch message (canonical format, no extra lines)
+        let dispatchMessage = `**Dispatch:** You have been dispatched to a ${age} year-old ${gender} at ${location} at ${time} for ${content}.`;
+        // Optionally add presence sentence (50%) using seed
+        const baseSeed = Math.floor(Math.abs(Number(seed))) || Date.now();
+        const pronoun = gender === 'female' ? 'Her' : 'His';
+        const presenceOptions = ['husband', 'wife', 'roommate', 'family member', 'bystander', 'coworker'];
+        const includePresence = (baseSeed % 2) === 0;
+        if (includePresence) {
+          const idx = baseSeed % presenceOptions.length;
+          dispatchMessage += ` ${pronoun} ${presenceOptions[idx]} is on scene.`;
+        }
+        // Add training note as a separate paragraph
         dispatchMessage += '\n\nLet me know when you are ready to begin the scenario. It is recommended that you use voice input to practice your verbal communication skills.';
         
-        console.log('📝 Using template dispatch:', { location, time, mechanism, callerInfo });
+        console.log('📝 Using template dispatch:', { location, time, content, callerInfo });
         return dispatchMessage;
       }
       
@@ -407,12 +437,12 @@ class PostProcessor {
       const location = this.generateScenarioAwareLocation(scenarioType, validSeed + 2);
       console.log('📍 Generated location:', location);
       
-      // Generate time
+      // Generate time (lowercase, no space)
       const time = this.generateTime(validSeed + 3);
       console.log('⏰ Generated time:', time);
       
-      // Generate somewhat specific condition based on scenario type
-      let condition;
+      // Generate content based on scenario type (mechanism for trauma, symptoms for medical)
+      let content;
       if (scenarioType.includes('cardiac')) {
         const cardiacConditions = [
           'chest pain radiating to left arm',
@@ -423,7 +453,7 @@ class PostProcessor {
           'chest pressure and jaw pain',
           'chest pain with back pain'
         ];
-        condition = cardiacConditions[(validSeed + 4) % cardiacConditions.length];
+        content = cardiacConditions[(validSeed + 4) % cardiacConditions.length];
       } else if (scenarioType.includes('respiratory')) {
         const respiratoryConditions = [
           'difficulty breathing with wheezing',
@@ -434,50 +464,50 @@ class PostProcessor {
           'wheezing and chest pain',
           'difficulty breathing with blue lips'
         ];
-        condition = respiratoryConditions[(validSeed + 4) % respiratoryConditions.length];
+        content = respiratoryConditions[(validSeed + 4) % respiratoryConditions.length];
       } else if (scenarioType.includes('trauma')) {
         // Check for specific trauma subtypes
         if (scenarioType.includes('mvc') || scenarioType.includes('motor vehicle') || scenarioType.includes('car accident')) {
           const mvcConditions = [
-            'motor vehicle collision with head trauma',
-            'car accident with chest pain and difficulty breathing',
-            'vehicle rollover with multiple injuries',
-            'rear-end collision with neck pain',
-            'side-impact collision with abdominal pain',
-            'head-on collision with unconscious driver',
-            'multi-vehicle pileup with critical injuries',
-            'pedestrian struck by vehicle with leg injuries'
+            'motor vehicle collision, head injury',
+            'car accident, chest pain and trouble breathing',
+            'vehicle rollover, multiple injuries',
+            'rear-end collision, neck pain',
+            'side-impact collision, abdominal pain',
+            'head-on collision, unconscious driver',
+            'multi-vehicle pileup, critical injuries',
+            'pedestrian struck by vehicle, leg injury'
           ];
-          condition = mvcConditions[(validSeed + 4) % mvcConditions.length];
+          content = mvcConditions[(validSeed + 4) % mvcConditions.length];
         } else if (scenarioType.includes('fall')) {
           const fallConditions = [
-            'fall from ladder with possible head injury',
-            'fall from roof with back pain',
-            'slip and fall with hip fracture',
-            'fall down stairs with multiple injuries',
-            'fall from height with leg injuries'
+            'fell from ladder, head injury',
+            'fell from roof, back pain',
+            'slip and fall, hip pain',
+            'fell down stairs, multiple injuries',
+            'fall from height, leg injury'
           ];
-          condition = fallConditions[(validSeed + 4) % fallConditions.length];
+          content = fallConditions[(validSeed + 4) % fallConditions.length];
         } else if (scenarioType.includes('assault')) {
           const assaultConditions = [
-            'assault victim with head injury',
-            'beaten with object causing facial injuries',
-            'physical altercation with chest trauma',
-            'attack resulting in multiple injuries'
+            'assault victim, head injury',
+            'beaten with object, facial injuries',
+            'physical altercation, chest trauma',
+            'attack, multiple injuries'
           ];
-          condition = assaultConditions[(validSeed + 4) % assaultConditions.length];
+          content = assaultConditions[(validSeed + 4) % assaultConditions.length];
         } else {
           // General trauma conditions
           const traumaConditions = [
-            'motor vehicle collision with chest pain',
-            'sports injury with shoulder pain',
-            'fall with possible leg fracture',
-            'accident with multiple injuries',
-            'bicycle accident with road rash',
-            'workplace injury with back pain',
-            'construction accident with leg pain'
+            'motor vehicle collision, chest pain',
+            'sports injury, shoulder pain',
+            'fall, possible leg fracture',
+            'accident, multiple injuries',
+            'bicycle accident, road rash',
+            'workplace injury, back pain',
+            'construction accident, leg pain'
           ];
-          condition = traumaConditions[(validSeed + 4) % traumaConditions.length];
+          content = traumaConditions[(validSeed + 4) % traumaConditions.length];
         }
       } else if (scenarioType.includes('neurological')) {
         const neuroConditions = [
@@ -489,7 +519,7 @@ class PostProcessor {
           'sudden onset of confusion',
           'severe headache and nausea'
         ];
-        condition = neuroConditions[(validSeed + 4) % neuroConditions.length];
+        content = neuroConditions[(validSeed + 4) % neuroConditions.length];
       } else if (scenarioType.includes('metabolic')) {
         const metabolicConditions = [
           'confusion and dizziness',
@@ -500,7 +530,7 @@ class PostProcessor {
           'shaking and sweating',
           'weakness with rapid breathing'
         ];
-        condition = metabolicConditions[(validSeed + 4) % metabolicConditions.length];
+        content = metabolicConditions[(validSeed + 4) % metabolicConditions.length];
       } else {
         // Mix of all condition types for variety
         const allConditions = [
@@ -515,22 +545,29 @@ class PostProcessor {
           'seizure activity witnessed',
           'unconscious and unresponsive'
         ];
-        condition = allConditions[(validSeed + 4) % allConditions.length];
+        content = allConditions[(validSeed + 4) % allConditions.length];
       }
       
       // Generate bystander info
       const bystanderInfo = this.generateBystanderInfo(location, validSeed + 5);
-      console.log('🚨 Generated condition:', condition);
-      
-      // Build the compliant dispatch message
-      console.log('🔧 Building dispatch with:', { age, gender, location, time, condition });
-      let dispatchMessage = `**Dispatch Information:** You have been dispatched to a ${age} year old ${gender} at ${location}, ${time} for ${condition}.`;
-      
-      // Add bystander info if present
-      if (bystanderInfo) {
-        dispatchMessage += ` ${bystanderInfo}`;
+      // For medical scenarios (non-trauma), limit symptoms list to max two
+      if (!scenarioType.includes('trauma')) {
+        content = this.limitSymptoms(content, 2);
       }
       
+      // Build the compliant dispatch message (canonical format)
+      console.log('🔧 Building dispatch with:', { age, gender, location, time, content });
+      let dispatchMessage = `**Dispatch:** You have been dispatched to a ${age} year-old ${gender} at ${location} at ${time} for ${content}.`;
+      
+      // Presence sentence (50%) using seed
+      const pronoun = gender === 'female' ? 'Her' : 'His';
+      const presenceOptions = ['husband', 'wife', 'roommate', 'family member', 'bystander', 'coworker'];
+      const includePresence = (validSeed % 2) === 0;
+      if (includePresence) {
+        const idx = (validSeed + 7) % presenceOptions.length;
+        dispatchMessage += ` ${pronoun} ${presenceOptions[idx]} is on scene.`;
+      }
+      // Add training note as a separate paragraph
       dispatchMessage += '\n\nLet me know when you are ready to begin the scenario. It is recommended that you use voice input to practice your verbal communication skills.';
       
       return dispatchMessage;
@@ -563,14 +600,18 @@ class PostProcessor {
       let dispatchLine = `**Dispatch Information:** You have been dispatched to a`;
       
       // Add patient info if available
-      if (patientProfile?.age && patientProfile?.age !== 'unknown') {
-        dispatchLine += ` ${patientProfile.age} year old`;
-        if (patientProfile?.gender && patientProfile?.gender !== 'unknown') {
-          dispatchLine += ` ${patientProfile.gender}`;
-        }
-      } else {
-        dispatchLine += ` 45 year old male`;
+      let age = '45';
+      let gender = 'male';
+      
+      if (patientProfile?.age && patientProfile?.age !== 'unknown' && patientProfile?.age !== 'Unknown') {
+        age = patientProfile.age;
       }
+      
+      if (patientProfile?.gender && patientProfile?.gender !== 'unknown' && patientProfile?.gender !== 'Unknown') {
+        gender = patientProfile.gender;
+      }
+      
+      dispatchLine += ` ${age} year old ${gender}`;
       
       dispatchLine += ` at ${location}, ${time} for ${mechanism}.`;
       
@@ -594,8 +635,16 @@ class PostProcessor {
       const { patientProfile, dispatchInfo } = generatedScenario;
       
       // Extract information with fallbacks
-      const age = patientProfile?.age || '45';
-      const gender = patientProfile?.gender || 'male';
+      let age = '45';
+      let gender = 'male';
+      
+      if (patientProfile?.age && patientProfile?.age !== 'unknown' && patientProfile?.age !== 'Unknown') {
+        age = patientProfile.age;
+      }
+      
+      if (patientProfile?.gender && patientProfile?.gender !== 'unknown' && patientProfile?.gender !== 'Unknown') {
+        gender = patientProfile.gender;
+      }
       const location = dispatchInfo?.location || '1425 El Camino Real';
       
       // Ensure we have a proper time

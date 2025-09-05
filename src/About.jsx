@@ -22,45 +22,53 @@ export default function About() {
       <div style={{
         marginTop: '76px',
         flexGrow: 1,
-        padding: '4rem 1rem 2rem',
+        padding: '6rem 1rem 2rem',
         maxWidth: '900px',
         margin: '0 auto',
         width: '100%'
       }}>
-        <h1 style={{
-          fontSize: '2.5rem',
-          fontWeight: 'bold',
+        <div style={{
+          backgroundColor: '#ffffff',
           color: '#000000',
-          marginBottom: '1.5rem',
-          marginTop: '2rem'
+          borderRadius: '20px',
+          padding: '2rem',
+          boxShadow: '0 10px 24px rgba(0, 0, 0, 0.12)'
         }}>
-          About EMED Scenario Trainer
-        </h1>
-        <p style={{
-          fontSize: '1rem',
-          lineHeight: '1.6',
-          color: '#000000',
-          marginBottom: '1rem'
-        }}>
-          EMED Scenario Trainer is a platform designed to help EMT students practice and improve their reasoning and communication abilities in a variety of medical and trauma scenarios. The site provides realistic situations that EMTs might encounter in the field, allowing them to practice their skills in an accessible place.
-        </p>
-        <p style={{
-          fontSize: '1rem',
-          lineHeight: '1.6',
-          color: '#000000',
-        }}>
-          Questions? Feedback? Email{' '}
-          <a 
-            href="mailto:arinv@stanford.edu" 
-            style={{
-              color: '#0000FF',
-              textDecoration: 'none',
-              fontWeight: 'normal'
-            }}
-          >
-            arinv@stanford.edu
-          </a>.
-        </p>
+          <h1 style={{
+            fontSize: '2.5rem',
+            fontWeight: 'bold',
+            color: '#000000',
+            marginBottom: '1.5rem',
+            marginTop: '0'
+          }}>
+            About EMED Scenario Trainer
+          </h1>
+          <p style={{
+            fontSize: '1rem',
+            lineHeight: '1.6',
+            color: '#000000',
+            marginBottom: '1rem'
+          }}>
+            EMED Scenario Trainer is a platform designed to help EMT students practice and improve their reasoning and communication abilities in a variety of medical and trauma scenarios. The site provides realistic situations that EMTs might encounter in the field, allowing them to practice their skills in an accessible place.
+          </p>
+          <p style={{
+            fontSize: '1rem',
+            lineHeight: '1.6',
+            color: '#000000',
+          }}>
+            Questions? Feedback? Email{' '}
+            <a 
+              href="mailto:arinv@stanford.edu" 
+              style={{
+                color: '#0000FF',
+                textDecoration: 'none',
+                fontWeight: 'normal'
+              }}
+            >
+              arinv@stanford.edu
+            </a>.
+          </p>
+        </div>
       </div>
     </div>
   );

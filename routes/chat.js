@@ -57,12 +57,16 @@ const validateChatInput = (req, res, next) => {
 // Main chat endpoint
 router.post('/chat', validateChatInput, async (req, res) => {
   try {
-    const { message, conversation = [], scenarioData = null } = req.body;
+    const { message, conversation = [], scenarioData = null, seed = null } = req.body;
 
     console.log(`Received message: ${message.substring(0, 100)}...`);
     console.log('Scenario data:', scenarioData);
 
-    const result = await chatService.generateResponse(message, conversation, scenarioData);
+    // Thread deterministic seed via scenarioData.meta.seed
+    const scenarioWithMeta = scenarioData || {};
+    scenarioWithMeta.meta = Object.assign({}, scenarioWithMeta.meta || {}, seed ? { seed } : {});
+
+    const result = await chatService.generateResponse(message, conversation, scenarioWithMeta);
 
     res.json({
       success: true,
@@ -70,7 +74,7 @@ router.post('/chat', validateChatInput, async (req, res) => {
         response: result.response,
         conversation: result.conversation,
         usage: result.usage,
-        scenarioData: result.enhancedScenarioData || scenarioData // Include enhanced scenario data
+        scenarioData: result.enhancedScenarioData || scenarioWithMeta // Include enhanced scenario data
       },
       timestamp: new Date().toISOString()
     });

@@ -16,10 +16,11 @@ const ActionRecognizer = require('./actionRecognizer');
 const BystanderManager = require('./bystanderManager');
 const EnvironmentalManager = require('./environmentalManager');
 const PerformanceEvaluator = require('./performanceEvaluator');
+// Feedback mode removed per requirements
 
 class ChatService {
   constructor() {
-    this.defaultModel = 'gpt-4o-mini'; // Advanced model with better performance
+    this.defaultModel = 'gpt-4o-mini'; // Dispatch/short responses
     this.maxTokens = 800;
     this.temperature = 0.7;
     this.pdfContent = null;
@@ -39,6 +40,8 @@ class ChatService {
     // Track current scenario state
     this.currentScenarioActive = false;
     this.scenarioEndReason = null;
+    
+    // Feedback mode removed
   }
 
   // ---------- Core vital signs generation (simplified) ----------
@@ -531,13 +534,32 @@ class ChatService {
     return difficultyContext;
   }
 
+  // ---------- Feedback mode detection and handling ----------
+  isFeedbackRequest(userMessage) {
+    const feedbackKeywords = [
+      'feedback', 'improve', 'better', 'fix', 'wrong', 'issue', 'problem',
+      'age', 'gender', 'location', 'time', 'symptoms', 'medical', 'realistic'
+    ];
+    
+    const messageLower = userMessage.toLowerCase();
+    return feedbackKeywords.some(keyword => messageLower.includes(keyword));
+  }
+
+  isFeedbackModeRequest(userMessage) {
+    const modeKeywords = ['feedback mode', 'feedback system', 'start feedback', 'enable feedback'];
+    const messageLower = userMessage.toLowerCase();
+    return modeKeywords.some(keyword => messageLower.includes(keyword));
+  }
+
   // ---------- Main response generation method ----------
   async generateResponse(userMessage, conversation = [], scenarioData = null) {
     console.log('🔍 Starting generateResponse...');
     console.log('📝 Message length:', userMessage?.length || 0);
     console.log('🎭 Scenario data:', scenarioData);
 
-    // Check for initial scenario generation request (highest priority)
+    // Feedback mode removed
+
+    // Check for initial scenario generation request (third priority)
     if (this.isInitialScenarioRequest(userMessage, conversation)) {
       console.log('🎭 Detected initial scenario request - generating comprehensive scenario...');
       
@@ -560,7 +582,15 @@ class ChatService {
       try {
         // Try template-based approach first (more reliable)
         console.log('🎯 Attempting template-based scenario generation...');
-        const templateResult = await this.templateGenerator.generateCompleteScenario(scenarioData);
+        let attempts = 0;
+        const maxAttempts = 3;
+        let templateResult;
+        while (attempts < maxAttempts) {
+          attempts++;
+          templateResult = await this.templateGenerator.generateCompleteScenario(scenarioData);
+          if (!templateResult.error) break;
+          console.log(`🔁 Template validation failed (attempt ${attempts})`);
+        }
         
         if (!templateResult.error) {
           console.log('✅ Template-based scenario generation successful');
@@ -575,6 +605,7 @@ class ChatService {
           console.log('📝 Generating dispatch information for new scenario...');
           const dispatchContent = await PostProcessor.enforceInitialDispatchMessage('', scenarioData);
           
+          // Add feedback prompt if in feedback mode
           return { 
             response: dispatchContent, 
             additionalMessages: [], 
@@ -582,39 +613,12 @@ class ChatService {
           };
         }
         
-        // If template approach fails, fall back to original approach
-        console.log('🔄 Template approach failed, trying original scenario generation...');
-        const enhancedScenarioData = await this.scenarioGenerator.generateCompleteScenario(scenarioData);
-        
-        // Check if scenario generation failed
-        if (enhancedScenarioData.error) {
-          console.log('❌ Both template and original scenario generation failed');
-          return { 
-            response: 'Failure to generate scenario', 
-            additionalMessages: [], 
-            enhancedScenarioData: null 
-          };
-        }
-        
-        console.log('✅ Original scenario generation successful');
-        
-        // Store the dispatch info immediately when AI generates it
-        if (enhancedScenarioData.dispatchInfo) {
-          scenarioData.dispatchInfo = enhancedScenarioData.dispatchInfo;
-          console.log('💾 Stored dispatch info from original generation:', scenarioData.dispatchInfo);
-        }
-        
-        // Update the scenario data with the generated content
-        scenarioData = enhancedScenarioData;
-        
-        // Generate the dispatch information and return immediately
-        console.log('📝 Generating dispatch information for new scenario...');
-        const dispatchContent = await PostProcessor.enforceInitialDispatchMessage('', scenarioData);
-        
+        // If template approach fails after retries, return error (no auto-fallback)
+        console.log('❌ Template approach failed after retries');
         return { 
-          response: dispatchContent, 
+          response: 'Error: Unable to generate a compliant dispatch after 3 attempts. Please try again.', 
           additionalMessages: [], 
-          enhancedScenarioData: scenarioData 
+          enhancedScenarioData: null 
         };
       } catch (error) {
         console.error('❌ Failed to generate comprehensive scenario:', error);
@@ -873,7 +877,12 @@ class ChatService {
       if (isConversation) {
         // Handle as natural patient conversation - no action recognition needed
         console.log('💬 Handling as patient conversation - skipping action recognition');
-        additionalContext = 'PATIENT_CONVERSATION: Respond naturally as the patient to this introduction/conversation';
+        additionalContext = 'PATIENT_CONVERSATION: Respond naturally as the patient to this introduction/conversation. Keep it short and in quotes.';
+        // Short-circuit to ensure a patient reply even if scenario not active
+        const messages = await this.createMessages(userMessage, conversation, scenarioData, null, additionalContext);
+        const response = await this.callOpenAI(messages);
+        let sanitized = PostProcessor.postProcessObjectiveContent(response, userMessage);
+        return { response: sanitized, additionalMessages: [], enhancedScenarioData: scenarioData };
       } else {
         // Recognize and process user action
         const actionResult = this.actionRecognizer.recognizeAction(userMessage);
@@ -1000,13 +1009,14 @@ class ChatService {
     return messages;
   }
 
-  async callOpenAI(messages) {
+  async callOpenAI(messages, options = {}) {
     console.log('🚀 Calling OpenAI API...');
-    console.log('🤖 Model:', this.defaultModel);
+    const model = options.model || this.defaultModel;
+    console.log('🤖 Model:', model);
 
     try {
       const completion = await openai.chat.completions.create({
-        model: this.defaultModel,
+        model: model,
         messages: messages,
         max_tokens: this.maxTokens,
         temperature: this.temperature,
@@ -1442,7 +1452,9 @@ Format as JSON with keys: assessment, strengths, improvements, recommendations, 
       /\bwhat\s+seems\s+to\s+be\s+the\s+problem/,
       /\bwhat'?s\s+the\s+problem/,
       /\bwhat'?s\s+going\s+on/,
-      /\bwhat'?s\s+wrong/
+      /\bwhat'?s\s+wrong/,
+      /\bcan\s+i\s+help\s+you\b/,
+      /\bcan\s+i\s+assist\s+you\b/
     ];
     
     // Check if it matches conversation patterns
@@ -1511,7 +1523,8 @@ Follow these STRICT guidelines:
         { role: 'user', content: userPrompt }
       ];
       
-      const response = await this.callOpenAI(messages);
+      // Use higher-quality model for scene generation
+      const response = await this.callOpenAI(messages, { model: 'gpt-4o' });
       
       // Ensure the response ends with "Awaiting your next step."
       let impression = response;

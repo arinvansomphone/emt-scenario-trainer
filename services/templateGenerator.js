@@ -45,17 +45,205 @@ Fill in this template with realistic details:
 {
   "location": "[specific location where incident occurred - be specific like 'shopping mall food court', 'hiking trail near Pine Ridge Park', 'residential home on Oak Street']",
   "time": "[time in format like '2:30 PM', '10:45 AM', '4:15 PM' - NOT 'afternoon', 'morning', or '<current time>']",
-  "callerInfo": "[who called 911 - be specific like 'bystander who noticed patient clutching chest', 'family member', 'co-worker']",
-  "mechanism": "[specific symptoms or mechanism - be specific like 'chest pain and shortness of breath', 'fell from ladder complaining of back pain', 'difficulty breathing after bee sting' - NOT 'medical emergency' or 'requiring medical attention']"
+  "callerInfo": "[who called 911 - choose ONE: 'A coworker called 911 and is present on scene as well.' OR 'A family member called 911 and is present on scene as well.' OR 'A bystander called 911 and is present on scene as well.' OR 'The patient called 911 themselves.']",
+  "mechanism": "[what a 911 caller would actually say - use layperson language, NOT medical terminology. Examples: 'car accident, someone hurt' NOT 'MVC with possible injuries', 'chest pain and trouble breathing' NOT 'cardiac event', 'fell down stairs' NOT 'trauma to extremities']"
 }
 
 CRITICAL REQUIREMENTS:
 - Time must be in specific format (e.g., "2:30 PM") - no placeholders
-- Mechanism must be specific symptoms or observable conditions
+- Mechanism must be what a 911 caller would actually say (layperson language)
 - Location must be a specific place, not generic
+- CallerInfo must be one of the four provided options
 - All fields are required
 
 Return ONLY the JSON object, no additional text or comments.`;
+  }
+
+  /**
+   * Generate a complete dispatch template prompt for the AI to fill
+   * @param {string} scenarioType - Type of scenario (e.g., 'Cardiac Scenario')
+   * @returns {string} - Template prompt
+   */
+  generateCompleteDispatchTemplate(scenarioType) {
+    const traumaScenarios = ['MVC Scenario', 'Fall Scenario', 'Assault Scenario', 'Sport Injury Scenario', 'Stabbing Scenario', 'GSW Scenario', 'Burn Scenario'];
+    const isTrauma = traumaScenarios.includes(scenarioType);
+    
+    const categoryRequirement = isTrauma 
+      ? `🚨 TRAUMA SCENARIO REQUIREMENT: This MUST be a trauma/injury scenario with physical injuries from external mechanisms (collision, fall, stabbing, etc.). NO medical illness or disease processes.`
+      : `🚨 MEDICAL SCENARIO REQUIREMENT: This MUST be a medical scenario with illness/disease processes. NO trauma, injuries, or external mechanisms.`;
+    
+    const mechanismExamples = isTrauma
+      ? this.getTraumaMechanismExamples(scenarioType)
+      : this.getMedicalMechanismExamples(scenarioType);
+    
+    return `Generate complete dispatch information for a ${scenarioType}. 
+
+${categoryRequirement}
+
+${mechanismExamples}
+
+Fill in this template with realistic details:
+
+{
+  "age": "[patient age - choose appropriate age for scenario type. Cardiac: 45-75, Trauma: 18-50, Respiratory: 25-65, Neurologic: 40-70, Metabolic: 25-60, General: 20-70]",
+  "gender": "[patient gender - 'male' or 'female']",
+  "location": "[Santa Clara–centric named POI or generic place (no house numbers)]",
+  "time": "[time in format like '3:20pm' or '11:50pm' (lowercase, no space)]",
+  "callerInfo": "[one of: 'A coworker called 911 and is present on scene as well.' | 'A family member called 911 and is present on scene as well.' | 'A bystander called 911 and is present on scene as well.' | 'The patient called 911 themselves.']",
+  "symptoms": "[for medical scenarios: patient's symptoms in medical dispatch format]",
+  "mechanism": "[for trauma scenarios: layperson phrasing of what happened, e.g., 'fell down stairs, leg pain']"
+}
+
+CRITICAL REQUIREMENTS:
+- Scenario MUST match requested category AND specific subcategory
+- Age must be appropriate for the scenario type and realistic
+- Gender must be 'male' or 'female'
+- Time must be lowercase hh:mmam/pm (e.g., "3:20pm") - no placeholders
+- Medical scenarios: use symptoms
+- Trauma scenarios: use mechanism (layperson phrasing)
+- Location must be Santa Clara–centric named POI or generic place; avoid house numbers
+- CallerInfo must be one of the four provided options
+- All fields are required
+
+Return ONLY the JSON object, no additional text or comments.`;
+  }
+
+  /**
+   * Enhanced validation for dispatch information
+   * @param {Object} dispatchData - The dispatch data to validate
+   * @param {string} scenarioType - The scenario type for context
+   * @returns {Object} - Validation result with errors and suggestions
+   */
+  validateDispatchData(dispatchData, scenarioType) {
+    const errors = [];
+    const suggestions = [];
+    
+    // Validate age
+    if (!dispatchData.age) {
+      errors.push('Missing age');
+    } else {
+      const age = parseInt(dispatchData.age);
+      if (isNaN(age) || age < 1 || age > 120) {
+        errors.push('Invalid age value');
+      }
+      
+      // Check age appropriateness for scenario
+      const scenarioTypeLower = scenarioType.toLowerCase();
+      if (scenarioTypeLower.includes('cardiac') && (age < 45 || age > 75)) {
+        suggestions.push('Consider age 45-75 for cardiac scenarios');
+      } else if (scenarioTypeLower.includes('trauma') && (age < 18 || age > 50)) {
+        suggestions.push('Consider age 18-50 for trauma scenarios');
+      }
+    }
+    
+    // Validate gender
+    if (!dispatchData.gender || !['male', 'female'].includes(dispatchData.gender.toLowerCase())) {
+      errors.push('Invalid gender - must be "male" or "female"');
+    }
+    
+    // Validate location
+    if (!dispatchData.location || dispatchData.location.length < 10) {
+      errors.push('Location too generic or missing');
+    }
+    
+    // Validate time format (lowercase hh:mmam/pm)
+    const timeRegex = /^(1[0-2]|[1-9]):[0-5][0-9](am|pm)$/;
+    if (!dispatchData.time || !timeRegex.test(dispatchData.time)) {
+      errors.push('Invalid time format - use format like "3:20pm"');
+    }
+    
+    // Validate symptoms/mechanism based on scenario type
+    const lowerType = (scenarioType || '').toLowerCase();
+    const isTrauma = /mvc|fall|assault|stabbing|gsw|burn|trauma/.test(lowerType);
+    if (isTrauma) {
+      if (!dispatchData.mechanism) {
+        errors.push('Missing mechanism for trauma scenario');
+      }
+    } else {
+      if (!dispatchData.symptoms) {
+        errors.push('Missing symptoms for medical scenario');
+      } else {
+        const symptoms = dispatchData.symptoms.toLowerCase();
+        const callerTerms = ['my dad', 'my mom', 'my husband', 'my wife', 'my brother', 'my sister', 'he\'s', 'she\'s', 'he is', 'she is'];
+        const hasCallerTerms = callerTerms.some(term => symptoms.includes(term));
+        if (hasCallerTerms) {
+          errors.push('Symptoms contain caller quotes - should be medical description');
+          suggestions.push('Use medical terminology like "confusion and slurred speech" instead of caller quotes');
+        }
+        if (symptoms.length < 10) {
+          suggestions.push('Symptoms description could be more detailed');
+        }
+      }
+    }
+    
+    // Validate caller info
+    const validCallerOptions = [
+      'A coworker called 911 and is present on scene as well.',
+      'A family member called 911 and is present on scene as well.',
+      'A bystander called 911 and is present on scene as well.',
+      'The patient called 911 themselves.'
+    ];
+    
+    if (!dispatchData.callerInfo || !validCallerOptions.includes(dispatchData.callerInfo)) {
+      errors.push('Invalid caller info - must be one of the specified options');
+    }
+    
+    return {
+      isValid: errors.length === 0,
+      errors,
+      suggestions,
+      score: Math.max(0, 100 - (errors.length * 20) - (suggestions.length * 5))
+    };
+  }
+
+  /**
+   * Generate fallback dispatch data for when AI generation fails
+   * @param {string} scenarioType - The scenario type
+   * @returns {Object} - Fallback dispatch data
+   */
+  generateFallbackDispatch(scenarioType) {
+    const scenarioTypeLower = scenarioType.toLowerCase();
+    
+    // Determine appropriate age range
+    let age;
+    if (scenarioTypeLower.includes('cardiac')) {
+      age = '58';
+    } else if (scenarioTypeLower.includes('trauma')) {
+      age = '32';
+    } else if (scenarioTypeLower.includes('respiratory')) {
+      age = '45';
+    } else if (scenarioTypeLower.includes('neurologic')) {
+      age = '62';
+    } else if (scenarioTypeLower.includes('metabolic')) {
+      age = '38';
+    } else {
+      age = '45';
+    }
+    
+    // Determine appropriate symptoms
+    let symptoms;
+    if (scenarioTypeLower.includes('cardiac')) {
+      symptoms = 'chest pain and shortness of breath';
+    } else if (scenarioTypeLower.includes('respiratory')) {
+      symptoms = 'difficulty breathing with wheezing';
+    } else if (scenarioTypeLower.includes('neurologic')) {
+      symptoms = 'confusion and slurred speech';
+    } else if (scenarioTypeLower.includes('metabolic')) {
+      symptoms = 'confusion and dizziness';
+    } else if (scenarioTypeLower.includes('abdominal')) {
+      symptoms = 'severe abdominal pain';
+    } else {
+      symptoms = 'medical emergency';
+    }
+    
+    return {
+      age: age,
+      gender: 'male',
+      location: 'residential home on Oak Street',
+      time: '2:30 PM',
+      callerInfo: 'A family member called 911 and is present on scene as well.',
+      symptoms: symptoms
+    };
   }
 
   /**
@@ -65,15 +253,15 @@ Return ONLY the JSON object, no additional text or comments.`;
    */
   getTraumaMechanismExamples(scenarioType) {
     const examples = {
-      'MVC Scenario': 'Examples: "motor vehicle collision, chest pain" | "car accident, leg pain" | "vehicle rollover, head injury"',
-      'Fall Scenario': 'Examples: "fell from ladder, back pain" | "fall from roof, leg pain" | "fell down stairs, hip pain"',
-      'Stabbing Scenario': 'Examples: "stabbed in abdomen, conscious" | "knife wound to chest, alert" | "stabbing victim, arm injury"',
-      'Assault Scenario': 'Examples: "assault victim, head injury" | "beaten with object, arm injury" | "attacked, facial injuries"',
-      'Sport Injury Scenario': 'Examples: "football injury, shoulder pain" | "bicycle accident, head injury" | "skiing accident, leg injury"',
-      'GSW Scenario': 'Examples: "gunshot wound to leg, conscious" | "shooting victim, chest wound" | "gunshot to arm, alert"',
-      'Burn Scenario': 'Examples: "burned in kitchen fire, arm burns" | "house fire victim, face burns" | "chemical burn, hand injury"'
+      'MVC Scenario': 'Examples: "car accident, someone hurt" | "two cars crashed, driver injured" | "vehicle collision, passenger hurt"',
+      'Fall Scenario': 'Examples: "fell from ladder, back hurts" | "fell down stairs, leg injury" | "fell off roof, someone hurt"',
+      'Stabbing Scenario': 'Examples: "someone got stabbed, bleeding" | "knife attack, person injured" | "stabbing, victim hurt"',
+      'Assault Scenario': 'Examples: "someone got beaten up, head injury" | "assault, person hurt" | "attack, victim injured"',
+      'Sport Injury Scenario': 'Examples: "football injury, shoulder hurt" | "bicycle crash, head injury" | "skiing accident, leg broken"',
+      'GSW Scenario': 'Examples: "gunshot, someone shot" | "shooting, person injured" | "gunshot wound, victim hurt"',
+      'Burn Scenario': 'Examples: "kitchen fire, someone burned" | "house fire, burns" | "chemical burn, hand injured"'
     };
-    return examples[scenarioType] || 'Examples: "injury from external mechanism, pain/injury location"';
+    return examples[scenarioType] || 'Examples: "injury from accident, someone hurt"';
   }
 
   /**
@@ -83,15 +271,15 @@ Return ONLY the JSON object, no additional text or comments.`;
    */
   getMedicalMechanismExamples(scenarioType) {
     const examples = {
-      'Cardiac Scenario': 'Examples: "chest pain and shortness of breath" | "chest pain, sweating" | "heart palpitations"',
-      'Respiratory Scenario': 'Examples: "difficulty breathing" | "trouble breathing, wheezing" | "shortness of breath"',
-      'Neurologic Scenario': 'Examples: "sudden weakness on one side" | "confusion and slurred speech" | "severe headache"',
-      'Metabolic Scenario': 'Examples: "confusion and dizziness" | "diabetic emergency, unconscious" | "weakness and nausea"',
-      'Abdominal Scenario': 'Examples: "severe stomach pain" | "vomiting blood" | "abdominal pain and nausea"',
-      'Environmental Scenario': 'Examples: "difficulty breathing after bee sting" | "heat exhaustion, dizzy" | "allergic reaction"',
-      'OB/GYN Scenario': 'Examples: "pregnant woman, contractions" | "heavy bleeding" | "pregnancy complications"'
+      'Cardiac Scenario': 'Examples: "chest pain and trouble breathing" | "chest hurts, sweating" | "heart racing"',
+      'Respiratory Scenario': 'Examples: "trouble breathing" | "can\'t breathe well, wheezing" | "shortness of breath"',
+      'Neurologic Scenario': 'Examples: "sudden weakness on one side" | "confusion, slurred speech" | "bad headache"',
+      'Metabolic Scenario': 'Examples: "confusion and dizzy" | "diabetic emergency, passed out" | "weak and nauseous"',
+      'Abdominal Scenario': 'Examples: "severe stomach pain" | "vomiting blood" | "stomach hurts and nauseous"',
+      'Environmental Scenario': 'Examples: "trouble breathing after bee sting" | "heat exhaustion, dizzy" | "allergic reaction"',
+      'OB/GYN Scenario': 'Examples: "pregnant woman, contractions" | "heavy bleeding" | "pregnancy problems"'
     };
-    return examples[scenarioType] || 'Examples: "medical symptoms or illness presentation"';
+    return examples[scenarioType] || 'Examples: "medical symptoms or illness"';
   }
 
   /**
@@ -146,37 +334,7 @@ Return ONLY the JSON object, no additional text or comments.`;
 
       const parsedData = JSON.parse(cleanResponse);
       
-      // Validate required fields
-      const requiredFields = ['location', 'time', 'callerInfo', 'mechanism'];
-      const missingFields = requiredFields.filter(field => !parsedData[field]);
-      
-      if (missingFields.length > 0) {
-        return {
-          error: true,
-          message: 'Missing required fields in template response',
-          data: null
-        };
-      }
-
-      // Validate time format
-      const timeValue = parsedData.time;
-      if (!this.isValidTimeFormat(timeValue)) {
-        return {
-          error: true,
-          message: 'Invalid time format',
-          data: null
-        };
-      }
-
-      // Validate mechanism is not too generic
-      if (this.isGenericMechanism(parsedData.mechanism)) {
-        return {
-          error: true,
-          message: 'Mechanism is too generic',
-          data: null
-        };
-      }
-
+      // Parsing success; field-level validation happens later
       return {
         error: false,
         message: 'Template parsed successfully',
@@ -212,8 +370,8 @@ Return ONLY the JSON object, no additional text or comments.`;
       return false;
     }
     
-    // Accept formats like "2:30 PM", "10:45 AM", "4:15 PM"
-    const timeRegex = /^\d{1,2}:\d{2}\s*(AM|PM)$/i;
+    // Accept format like "3:20pm" (lowercase, no space)
+    const timeRegex = /^(1[0-2]|[1-9]):[0-5][0-9](am|pm)$/;
     return timeRegex.test(time);
   }
 
@@ -240,6 +398,59 @@ Return ONLY the JSON object, no additional text or comments.`;
   }
 
   /**
+   * Generate realistic patient demographics based on scenario type
+   * @param {string} scenarioType - Type of scenario
+   * @returns {Object} - Object with age and gender
+   */
+  generatePatientDemographics(scenarioType) {
+    const scenarioTypeLower = scenarioType.toLowerCase();
+    
+    // Generate age based on scenario type
+    let age;
+    if (scenarioTypeLower.includes('cardiac') || scenarioTypeLower.includes('heart')) {
+      const cardiacAges = [45, 52, 58, 63, 67, 71, 76];
+      age = cardiacAges[Math.floor(Math.random() * cardiacAges.length)];
+    } else if (scenarioTypeLower.includes('trauma') || scenarioTypeLower.includes('mvc') || 
+               scenarioTypeLower.includes('fall') || scenarioTypeLower.includes('assault') ||
+               scenarioTypeLower.includes('sport') || scenarioTypeLower.includes('stabbing') ||
+               scenarioTypeLower.includes('gsw') || scenarioTypeLower.includes('burn')) {
+      const traumaAges = [19, 25, 32, 28, 41, 35, 29, 47];
+      age = traumaAges[Math.floor(Math.random() * traumaAges.length)];
+    } else if (scenarioTypeLower.includes('respiratory') || scenarioTypeLower.includes('breathing') || 
+               scenarioTypeLower.includes('asthma')) {
+      const respiratoryAges = [28, 34, 41, 48, 55, 62, 37];
+      age = respiratoryAges[Math.floor(Math.random() * respiratoryAges.length)];
+    } else if (scenarioTypeLower.includes('neurological') || scenarioTypeLower.includes('stroke') || 
+               scenarioTypeLower.includes('seizure')) {
+      const neuroAges = [52, 59, 66, 73, 45, 38, 61];
+      age = neuroAges[Math.floor(Math.random() * neuroAges.length)];
+    } else if (scenarioTypeLower.includes('metabolic') || scenarioTypeLower.includes('diabetes') || 
+               scenarioTypeLower.includes('hypoglycemic')) {
+      const metabolicAges = [26, 33, 40, 47, 54, 61, 35];
+      age = metabolicAges[Math.floor(Math.random() * metabolicAges.length)];
+    } else if (scenarioTypeLower.includes('ob') || scenarioTypeLower.includes('gyn') || 
+               scenarioTypeLower.includes('pregnant')) {
+      const obAges = [18, 22, 25, 28, 31, 34, 37, 40];
+      age = obAges[Math.floor(Math.random() * obAges.length)];
+    } else {
+      // General scenario ages
+      const generalAges = [23, 31, 38, 44, 51, 59, 66, 29, 42, 56];
+      age = generalAges[Math.floor(Math.random() * generalAges.length)];
+    }
+    
+    // Generate gender (50/50 distribution, except OB/GYN which is always female)
+    let gender;
+    if (scenarioTypeLower.includes('ob') || scenarioTypeLower.includes('gyn') || 
+        scenarioTypeLower.includes('pregnant')) {
+      gender = 'female';
+    } else {
+      gender = Math.random() < 0.5 ? 'male' : 'female';
+    }
+    
+    return { age: age.toString(), gender };
+  }
+
+  /**
    * Generate complete scenario using template-based approach
    * @param {Object} scenarioData - Input scenario data
    * @returns {Object} - Generated scenario with dispatch info
@@ -258,7 +469,7 @@ Return ONLY the JSON object, no additional text or comments.`;
         };
       }
       
-      const template = this.generateDispatchTemplate(scenarioData.subScenario);
+      const template = this.generateCompleteDispatchTemplate(scenarioData.subScenario);
       
       const response = await this.openai.chat.completions.create({
         model: 'gpt-4o-mini',
@@ -292,25 +503,62 @@ Return ONLY the JSON object, no additional text or comments.`;
 
       console.log('✅ Template parsing successful');
       
+      // Enhanced validation with detailed feedback
+      const validation = this.validateDispatchData(parsedResult.data, scenarioData.subScenario);
+      // Enforce minimum quality score 80
+      if (validation.score < 80) {
+        return {
+          error: true,
+          message: 'Below quality threshold',
+          dispatchInfo: null
+        };
+      }
+      
+      if (!validation.isValid) {
+        console.log('⚠️ Dispatch validation failed:');
+        validation.errors.forEach(error => console.log(`  ❌ ${error}`));
+        validation.suggestions.forEach(suggestion => console.log(`  💡 ${suggestion}`));
+        console.log(`📊 Quality score: ${validation.score}/100`);
+        
+        // Use fallback if validation fails
+        console.log('❌ Validation below threshold; will signal error to caller for retry');
+        return {
+          error: true,
+          message: 'Validation failed',
+          dispatchInfo: null
+        };
+      } else {
+        console.log('✅ Dispatch validation passed');
+        if (validation.suggestions.length > 0) {
+          console.log('💡 Suggestions for improvement:');
+          validation.suggestions.forEach(suggestion => console.log(`  - ${suggestion}`));
+        }
+        console.log(`📊 Quality score: ${validation.score}/100`);
+      }
+      
+      // Generate realistic patient demographics based on scenario type
+      const { age, gender } = this.generatePatientDemographics(scenarioData.subScenario);
+      
       // Return the dispatch information in the expected format
       return {
         error: false,
         message: 'Scenario generated successfully',
         dispatchInfo: parsedResult.data,
+        validation: validation,
         // Include other scenario data for compatibility
         patientProfile: {
-          age: 'unknown',
-          gender: 'unknown',
+          age: age,
+          gender: gender,
           medicalHistory: ['Unknown'],
           medications: ['None known'],
           allergies: ['NKDA']
         },
         presentation: {
-          chiefComplaint: parsedResult.data.mechanism,
+          chiefComplaint: parsedResult.data.symptoms || parsedResult.data.mechanism,
           onsetTime: 'recent',
           severity: 'moderate',
           location: 'various',
-          description: `Patient presenting with ${parsedResult.data.mechanism}`
+          description: `Patient presenting with ${parsedResult.data.symptoms || parsedResult.data.mechanism}`
         }
       };
 
