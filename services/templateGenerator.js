@@ -536,9 +536,23 @@ Return ONLY the JSON object, no additional text or comments.`;
         console.log(`📊 Quality score: ${validation.score}/100`);
       }
       
-      // Generate realistic patient demographics based on scenario type
-      const { age, gender } = this.generatePatientDemographics(scenarioData.subScenario);
+      // Use demographics from dispatch when available to keep scenario consistent
+      // Fallback to generated demographics only if missing/invalid
+      let age = parsedResult.data?.age;
+      let gender = parsedResult.data?.gender;
       
+      const isValidGender = (g) => typeof g === 'string' && ['male', 'female'].includes(g.toLowerCase());
+      const hasValidAge = (a) => a !== undefined && a !== null && !isNaN(parseInt(String(a)));
+      
+      if (!hasValidAge(age) || !isValidGender(gender)) {
+        const generated = this.generatePatientDemographics(scenarioData.subScenario);
+        age = hasValidAge(age) ? String(age) : generated.age;
+        gender = isValidGender(gender) ? gender : generated.gender;
+      } else {
+        age = String(age);
+        gender = gender.toLowerCase();
+      }
+
       // Return the dispatch information in the expected format
       return {
         error: false,

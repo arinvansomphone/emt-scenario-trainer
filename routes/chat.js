@@ -74,6 +74,7 @@ router.post('/chat', validateChatInput, async (req, res) => {
         response: result.response,
         conversation: result.conversation,
         usage: result.usage,
+        additionalMessages: result.additionalMessages || [],
         scenarioData: result.enhancedScenarioData || scenarioWithMeta // Include enhanced scenario data
       },
       timestamp: new Date().toISOString()

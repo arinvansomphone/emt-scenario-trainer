@@ -155,10 +155,15 @@ export default function App() {
           setScenarioData(data.data.scenarioData);
         }
 
-        // Add user message to conversation
+        // Add user message and any server-provided system markers (e.g., generalImpressionShown)
+        const additional = Array.isArray(data.data.additionalMessages)
+          ? data.data.additionalMessages.filter(m => m && m.role === 'system')
+          : [];
+
         const updatedConversation = [
           ...conversation,
           { role: 'user', content: message },
+          ...additional,
           { role: 'assistant', content: data.data.response }
         ];
 

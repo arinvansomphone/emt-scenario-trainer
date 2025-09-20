@@ -243,8 +243,11 @@ class PostProcessor {
     // Minimal fallback processing - most rules now handled by system prompt
     // Only keep essential formatting that AI might miss occasionally
     
-    // Ensure final line ends with the required phrase (fallback)
-    if (!/Awaiting your next step\.?\s*$/.test(text)) {
+    // Ensure final line ends with the required phrase on a new line (fallback)
+    if (text.endsWith('Awaiting your next step.')) {
+      // If it already ends with the phrase, ensure it's on a new line
+      text = text.replace(/\s*Awaiting your next step\.\s*$/, '\n\nAwaiting your next step.');
+    } else if (!/Awaiting your next step\.?\s*$/.test(text)) {
       text = text.replace(/\s*$/m, '\n\nAwaiting your next step.');
     }
 

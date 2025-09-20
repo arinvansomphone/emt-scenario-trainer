@@ -51,10 +51,29 @@ class ChatService {
   parseExamRequest(userText) {
     const t = TextNormalizer.normalizeToAsciiLower(userText || '');
     
-    // Only trigger exam flow if explicit exam keywords are present
+    // Only trigger exam flow if explicit exam commands are present (avoid accidental triggers
+    // when the user is merely describing plans like "may perform a secondary exam later")
     const examKeywords = /\b(exam|examine|assessment|assess|inspect|palpate|physical|secondary|rapid.*trauma)\b/;
     if (!examKeywords.test(t)) {
       return { type: 'focused', regions: [] }; // Return empty regions to prevent exam flow
+    }
+    
+    // Block exam flow if phrased as tentative/plan rather than an immediate action
+    const tentativePhrasing = /(may|might|plan|planning|consider|later|eventually)\s+(?:to\s+)?(?:start|begin|perform|do)?\s*(?:a\s+)?(secondary|rapid.*trauma|physical)\s*(exam|assessment)/;
+    if (tentativePhrasing.test(t)) {
+      return { type: 'focused', regions: [] };
+    }
+    
+    // Require explicit intent to start/perform the exam now
+    const explicitExamIntent = new RegExp(
+      [
+        "\\b(?:let['’]?s\\s*(?:start|begin|do)|start|begin|perform|do)\\s*(?:a\\s*)?(secondary|rapid\\s*trauma|physical)\\s*(exam|assessment)(?:\\s*now)?\\b",
+        "\\bi\\s*(?:am|i'm|im|will|going\\s*to|gonna)\\s*(?:start|begin|perform|do)\\s*(?:a\\s*)?(secondary|rapid\\s*trauma|physical)\\s*(exam|assessment)(?:\\s*now)?\\b",
+        "\\bcan\\s+i\\s*(?:start|begin|perform|do)\\s*(?:a\\s*)?(secondary|rapid\\s*trauma|physical)\\s*(exam|assessment)\\b"
+      ].join('|')
+    );
+    if (!explicitExamIntent.test(t)) {
+      return { type: 'focused', regions: [] };
     }
     
     let type = 'focused';
@@ -157,7 +176,7 @@ class ChatService {
       '- Sentences only, no bullets, no coaching, no interpretation, no severity labels, no diagnoses.',
       '- Include only findings that were reasonably obtainable from inspection/palpation or from the user\'s answers.',
       '- Do not include lung sounds unless the user explicitly requested auscultation earlier in the conversation.',
-      '- End with exactly: "Awaiting your next step."'
+      '- End with exactly: "\\n\\nAwaiting your next step."'
     ].join('\n');
   }
 
@@ -177,15 +196,15 @@ class ChatService {
 
   // ---------- Readiness detection ----------
   isReadyIntent(userText) {
-    const t = TextNormalizer.normalizeToAsciiLower(userText);
-    return (
-      /\bready\b/.test(t) ||
-      /\bi['']?m\s*ready\b/.test(t) ||
-      /\blet['']?s\s*(start|begin)\b/.test(t) ||
-      /\bbegin\b/.test(t) ||
-      /\bstart\b.*\btimer\b/.test(t) ||
-      /\bready to begin\b/.test(t)
-    );
+    const t = TextNormalizer.normalizeToAsciiLower(userText || '');
+    // Only treat explicit, standalone readiness phrases as readiness.
+    // Avoid matching words like "begin" inside history questions.
+    const explicitReady = /^(?:\s*i['’]?m\s*)?ready\s*$/i.test(t);
+    const letsStart = /\blet['’]?s\s*(start|begin)\b/.test(t);
+    const startTimer = /\bstart\b.*\btimer\b/.test(t);
+    const readyToBegin = /\bready\s+to\s+begin\b/.test(t);
+    const standaloneBegin = /^(?:\s*begin(?:\s+(?:the\s+)?(?:scenario|case))?)\s*$/i.test(t);
+    return explicitReady || letsStart || startTimer || readyToBegin || standaloneBegin;
   }
 
   // Detect explicit pulse oximeter usage/mention
@@ -201,16 +220,24 @@ class ChatService {
   // Detect transport decision mentions
   isTransportDecision(userText) {
     const t = TextNormalizer.normalizeToAsciiLower(userText || '');
-    return /(transport|code\s*[123]|priority\s*[123]|non[- ]?emergent|emergent|lights.*sirens|to\s+(the\s+)?hospital|to\s+ed|to\s+er)/.test(t);
+    // Only treat as transport decision when explicitly stated. Avoid matching casual phrases like
+    // "get you to the hospital" which appear in patient reassurance.
+    const explicitTransportTo = /\btransport(?:ing)?\s+to\s+(the\s+)?(hospital|ed|er|emergency\s+department)\b/.test(t);
+    const codeOrPriority = /(\bcode\s*[123]\b|\bpriority\s*[123]\b)/.test(t);
+    const decisionPhrase = /\btransport\s+decision\b/.test(t);
+    const lightsSirens = /\blights?.*sirens\b/.test(t);
+    const emergentWord = /\bnon[- ]?emergent\b|\bemergent\b/.test(t);
+    return explicitTransportTo || codeOrPriority || decisionPhrase || lightsSirens || emergentWord;
   }
 
   extractTransportDetails(userText) {
     const t = TextNormalizer.normalizeToAsciiLower(userText || '');
     const codeMatch = t.match(/(code\s*[123]|priority\s*[123]|non[- ]?emergent|emergent)/);
-    const destMatch = t.match(/to\s+(the\s+)?((nearest\s+)?hospital|ed|er|emergency\s+department|[a-z ]+ hospital)/);
+    // Destination only when explicitly phrased as "transport to ..."
+    const destMatch = t.match(/transport(?:ing)?\s+to\s+(the\s+)?((nearest\s+)?hospital|ed|er|emergency\s+department|[a-z\s]+ hospital)/);
     const reasonMatch = t.match(/(?:for|because\s+of|due\s+to)\s+([^\.,;]+)/);
     const code = codeMatch ? codeMatch[0].replace(/\s+/g, ' ').trim() : null;
-    const dest = destMatch ? destMatch[0].replace(/\s+/g, ' ').trim() : null;
+    const dest = destMatch ? destMatch[0].replace(/^transport(?:ing)?\s+to\s+(the\s+)?/, '').replace(/\s+/g, ' ').trim() : null;
     const reason = reasonMatch ? reasonMatch[1].trim() : null;
     return { code, dest, reason };
   }
@@ -685,6 +712,18 @@ class ChatService {
 
     // Recognize and process user actions
     if (this.currentScenarioActive) {
+      // Early conversation handling: if the user is introducing themselves or
+      // engaging in simple conversation, force a patient reply BEFORE any
+      // action recognition to avoid unnecessary clarification prompts.
+      if (this.isPatientConversation(userMessage)) {
+        console.log('💬 Handling introduction/conversation before action recognition');
+        const additionalContext = 'PATIENT_CONVERSATION: Respond naturally as the patient to this introduction/conversation. Keep it short and in quotes.';
+        const messages = await this.createMessages(userMessage, conversation, scenarioData, null, additionalContext);
+        const response = await this.callOpenAI(messages);
+        let sanitized = PostProcessor.postProcessObjectiveContent(response, userMessage);
+        return { response: sanitized, additionalMessages: [], enhancedScenarioData: scenarioData };
+      }
+
       const recognizedAction = this.actionRecognizer.recognizeAction(userMessage);
       
       // Log action for performance evaluation
@@ -787,7 +826,7 @@ class ChatService {
       if (this.shouldStopExam(userMessage)) {
         // Stop exam flow
         const stopMessage = { role: 'system', content: JSON.stringify({ type: 'examFlow', action: 'stop' }) };
-        return { response: 'Exam stopped. Awaiting your next step.', additionalMessages: [stopMessage], enhancedScenarioData: scenarioData };
+        return { response: 'Exam stopped.\n\nAwaiting your next step.', additionalMessages: [stopMessage], enhancedScenarioData: scenarioData };
       }
 
       if (!activeFlow) {
@@ -1061,7 +1100,7 @@ FORMATTING REQUIREMENTS:
 9. Use exact numbers instead of "approximately"
 10. Write in complete sentences, never bullet points
 11. Only mention lung sounds (wheeze, crackles, rales) if EMT explicitly requests auscultation
-12. Always end your response with "Awaiting your next step."
+12. Always end your response with "\n\nAwaiting your next step."
 
 PATIENT BEHAVIOR BY AGE:
 13. Ages 18-30: Respond quickly, use casual language ("Yeah, sure", "Go for it", "No problem")
@@ -1454,7 +1493,14 @@ Format as JSON with keys: assessment, strengths, improvements, recommendations, 
       /\bwhat'?s\s+going\s+on/,
       /\bwhat'?s\s+wrong/,
       /\bcan\s+i\s+help\s+you\b/,
-      /\bcan\s+i\s+assist\s+you\b/
+      /\bcan\s+i\s+assist\s+you\b/,
+      // History-taking phrases (OPQRST-style)
+      /\bwhen\s+did\s+(?:it|this|that)\s+(?:start|begin)\b/,
+      /\bwhen\s+did\s+(?:your|the)\s+[a-z\s]+\s+(?:start|begin)\b/,
+      /\bhow\s+long\s+(?:have\s+you\s+had|has\s+this\s+been\s+going\s+on)\b/,
+      /\bwhat\s+makes\s+(?:it|this|that)\s+(?:better|worse)\b/,
+      /\bdoes\s+anything\s+make\s+(?:it|this|that)\s+(?:better|worse)\b/,
+      /\bwhat\s+were\s+you\s+doing\s+when\b/
     ];
     
     // Check if it matches conversation patterns
@@ -1486,8 +1532,9 @@ Format as JSON with keys: assessment, strengths, improvements, recommendations, 
       const { patientProfile, physicalFindings, dispatchInfo, presentation } = generatedScenario;
       
       // Extract key data for the AI to use
-      const age = patientProfile?.age || 'unknown age';
-      const gender = patientProfile?.gender || 'unknown gender';
+      // Prefer dispatch demographics to keep consistency if any mismatch occurs
+      const age = patientProfile?.age || dispatchInfo?.age || 'unknown age';
+      const gender = patientProfile?.gender || dispatchInfo?.gender || 'unknown gender';
       const location = dispatchInfo?.location || 'the scene';
       const appearance = physicalFindings?.generalAppearance || 'appears to be in mild distress';
       const consciousness = physicalFindings?.consciousness || 'alert';
@@ -1505,7 +1552,7 @@ Follow these STRICT guidelines:
 - No dialogue or patient statements
 - No medical assessment or diagnosis
 - No treatment recommendations
-- End with "Awaiting your next step."
+- End with "\n\nAwaiting your next step."
 - Maximum 3 sentences total for the description (plus the "Awaiting your next step." line)`;
 
       const userPrompt = `Create an initial scene description with these details:
@@ -1526,9 +1573,13 @@ Follow these STRICT guidelines:
       // Use higher-quality model for scene generation
       const response = await this.callOpenAI(messages, { model: 'gpt-4o' });
       
-      // Ensure the response ends with "Awaiting your next step."
+      // Ensure the response ends with "Awaiting your next step." on a new line
       let impression = response;
-      if (!impression.endsWith('Awaiting your next step.')) {
+      if (impression.endsWith('Awaiting your next step.')) {
+        // Remove the existing "Awaiting your next step." and add it with proper formatting
+        impression = impression.replace(/\s*Awaiting your next step\.\s*$/, '');
+        impression += '\n\nAwaiting your next step.';
+      } else if (!impression.endsWith('Awaiting your next step.')) {
         impression += '\n\nAwaiting your next step.';
       }
       
