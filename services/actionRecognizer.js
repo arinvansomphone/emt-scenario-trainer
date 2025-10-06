@@ -101,9 +101,11 @@ class ActionRecognizer {
       
       physicalAssessment: {
         patterns: [
-          /(inspect|examine|look at|check)\s+(.*?)\s*(head|neck|chest|abdomen|back|arm|leg)/i,
+          /(inspect|examine|look at|check)\s+(.*?)\s*(head|neck|chest|abdomen|back|arm|leg|airway|mouth)/i,
           /(palpate|feel|press)\s+(.*?)\s*(head|neck|chest|abdomen|back|arm|leg)/i,
           /(listen|auscultate)\s+(.*?)\s*(lung|heart|bowel|chest)/i,
+          /(check|assess|inspect)\s+(the\s+)?airway/i,
+          /(open\s+(?:your|the)\s+mouth).*(?:check|airway|inspect)/i,
           /physical\s+(exam|assessment)/i,
           /secondary\s+(exam|assessment)/i
         ],

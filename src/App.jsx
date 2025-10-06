@@ -37,7 +37,7 @@ export default function App() {
   const [scenarioData, setScenarioData] = useState(location.state || null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
-  const [timeLeft, setTimeLeft] = useState(20 * 60); // 20 minutes in seconds
+  const [timeLeft, setTimeLeft] = useState(20 * 60); // 20 minutes in seconds (synced with backend)
   const [isTimerRunning, setIsTimerRunning] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [conversation, setConversation] = useState([]);
@@ -125,6 +125,26 @@ export default function App() {
     return () => clearInterval(timer);
   }, [isTimerRunning, timeLeft]);
 
+  // Sync timer with backend-provided time limit when available (ONLY ONCE when scenario starts)
+  useEffect(() => {
+    const minutes = scenarioData?.meta?.timeLimitMinutes;
+    const startTime = scenarioData?.meta?.startTime;
+    
+    // Only set timer if we have a time limit AND a start time has been set (scenario started)
+    // AND we haven't started the timer yet
+    if (minutes && Number.isFinite(minutes) && startTime && !isTimerRunning) {
+      // Calculate actual time left based on start time
+      const now = Date.now();
+      const elapsedMs = now - startTime;
+      const elapsedSeconds = Math.floor(elapsedMs / 1000);
+      const totalSeconds = minutes * 60;
+      const remainingSeconds = Math.max(0, totalSeconds - elapsedSeconds);
+      
+      setTimeLeft(remainingSeconds);
+      setIsTimerRunning(true);
+    }
+  }, [scenarioData, isTimerRunning]);
+
   // Auto-scroll to latest message on updates
   useEffect(() => {
     scrollToBottom();
@@ -172,9 +192,6 @@ export default function App() {
         // Add AI response to messages (formatted for readability)
         const formattedResponse = formatAssistantText(data.data.response);
         setMessages(prev => [...prev, { sender: 'ai', text: formattedResponse }]);
-
-        // Check for readiness message to start timer (safety check on response path)
-        if (!isTimerRunning && isReadyMessage(message)) setIsTimerRunning(true);
       } else {
         // Handle API error
         setMessages(prev => [...prev, {
@@ -352,11 +369,6 @@ export default function App() {
 
     const messageText = input.trim();
     setInput('');
-
-    // Start timer immediately if the user indicates readiness
-    if (!isTimerRunning && isReadyMessage(messageText)) {
-      setIsTimerRunning(true);
-    }
 
     // Only repeat the readiness message if the scenario hasn't started yet
     const hasScenarioStarted = messages.some(msg => msg.text && msg.text.includes("You arrive at"));

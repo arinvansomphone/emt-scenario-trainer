@@ -43,16 +43,16 @@ ${mechanismExamples}
 Fill in this template with realistic details:
 
 {
-  "location": "[specific location where incident occurred - be specific like 'shopping mall food court', 'hiking trail near Pine Ridge Park', 'residential home on Oak Street']",
+  "location": "[specific non-medical location where incident occurred - DO NOT use or reference hospitals, ERs, medical centers, clinics, urgent care, dialysis centers, doctor's offices, nursing homes, skilled nursing facilities, rehabilitation facilities, or any medical facilities. Use locations like 'shopping mall food court', 'hiking trail near Pine Ridge Park', 'residential home on Oak Street', 'office building', 'park', 'restaurant', 'gym', 'school', 'warehouse', etc.]",
   "time": "[time in format like '2:30 PM', '10:45 AM', '4:15 PM' - NOT 'afternoon', 'morning', or '<current time>']",
-  "callerInfo": "[who called 911 - choose ONE: 'A coworker called 911 and is present on scene as well.' OR 'A family member called 911 and is present on scene as well.' OR 'A bystander called 911 and is present on scene as well.' OR 'The patient called 911 themselves.']",
+  "callerInfo": "[who called 911 - choose ONE: 'A coworker called 911 and is present on scene as well.' OR 'A friend called 911 and is present on scene as well.' OR 'A family member called 911 and is present on scene as well.' OR 'A bystander called 911 and is present on scene as well.' OR 'The patient called 911 themselves.']",
   "mechanism": "[what a 911 caller would actually say - use layperson language, NOT medical terminology. Examples: 'car accident, someone hurt' NOT 'MVC with possible injuries', 'chest pain and trouble breathing' NOT 'cardiac event', 'fell down stairs' NOT 'trauma to extremities']"
 }
 
 CRITICAL REQUIREMENTS:
 - Time must be in specific format (e.g., "2:30 PM") - no placeholders
 - Mechanism must be what a 911 caller would actually say (layperson language)
-- Location must be a specific place, not generic
+- Location must be a specific non-medical place, not generic and not any healthcare facility
 - CallerInfo must be one of the four provided options
 - All fields are required
 
@@ -87,9 +87,9 @@ Fill in this template with realistic details:
 {
   "age": "[patient age - choose appropriate age for scenario type. Cardiac: 45-75, Trauma: 18-50, Respiratory: 25-65, Neurologic: 40-70, Metabolic: 25-60, General: 20-70]",
   "gender": "[patient gender - 'male' or 'female']",
-  "location": "[Santa Clara–centric named POI or generic place (no house numbers)]",
+  "location": "[Santa Clara–centric named POI or specific non-medical place (no house numbers); NEVER a hospital, ER, clinic, urgent care, dialysis center, doctor's office, nursing facility, or any healthcare facility]",
   "time": "[time in format like '3:20pm' or '11:50pm' (lowercase, no space)]",
-  "callerInfo": "[one of: 'A coworker called 911 and is present on scene as well.' | 'A family member called 911 and is present on scene as well.' | 'A bystander called 911 and is present on scene as well.' | 'The patient called 911 themselves.']",
+  "callerInfo": "[one of: 'A coworker called 911 and is present on scene as well.' | 'A friend called 911 and is present on scene as well.' | 'A family member called 911 and is present on scene as well.' | 'A bystander called 911 and is present on scene as well.' | 'The patient called 911 themselves.']",
   "symptoms": "[for medical scenarios: patient's symptoms in medical dispatch format]",
   "mechanism": "[for trauma scenarios: layperson phrasing of what happened, e.g., 'fell down stairs, leg pain']"
 }
@@ -101,7 +101,7 @@ CRITICAL REQUIREMENTS:
 - Time must be lowercase hh:mmam/pm (e.g., "3:20pm") - no placeholders
 - Medical scenarios: use symptoms
 - Trauma scenarios: use mechanism (layperson phrasing)
-- Location must be Santa Clara–centric named POI or generic place; avoid house numbers
+- Location must be Santa Clara–centric named POI or specific non-medical place; avoid house numbers; absolutely no hospitals or medical facilities
 - CallerInfo must be one of the four provided options
 - All fields are required
 
@@ -144,6 +144,21 @@ Return ONLY the JSON object, no additional text or comments.`;
     // Validate location
     if (!dispatchData.location || dispatchData.location.length < 10) {
       errors.push('Location too generic or missing');
+    } else {
+      const loc = String(dispatchData.location).toLowerCase();
+      // Reject hospitals, ERs, clinics, urgent cares, and other medical facilities
+      const medicalFacilityTerms = [
+        'hospital', 'medical center', 'med center', 'med ctr', 'clinic', 'urgent care',
+        'emergency department', 'emergency room', 'er', 'ed', 'dialysis', "doctor's office",
+        'doctors office', 'physician office', 'nursing home', 'skilled nursing', 'snf',
+        'rehab', 'rehabilitation center', 'hospice', 'surgery center', 'ambulatory surgery',
+        'health center', 'care center'
+      ];
+      const containsMedicalFacility = medicalFacilityTerms.some(term => loc.includes(term));
+      if (containsMedicalFacility) {
+        errors.push('Invalid location - cannot be any hospital, clinic, or medical facility');
+        suggestions.push('Use a non-medical location such as a home, park, school, workplace, store, or public area');
+      }
     }
     
     // Validate time format (lowercase hh:mmam/pm)
@@ -179,6 +194,7 @@ Return ONLY the JSON object, no additional text or comments.`;
     // Validate caller info
     const validCallerOptions = [
       'A coworker called 911 and is present on scene as well.',
+      'A friend called 911 and is present on scene as well.',
       'A family member called 911 and is present on scene as well.',
       'A bystander called 911 and is present on scene as well.',
       'The patient called 911 themselves.'

@@ -105,14 +105,16 @@ export default function SelectionScreen() {
         display: 'flex', 
         justifyContent: 'center', 
         alignItems: 'center',
-        padding: '0 16px'
+        padding: '20px'
       }}>
         <div style={{ 
           background: 'white',
-          padding: '32px',
+          padding: '40px',
           borderRadius: '16px',
-          boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
-          width: '400px'
+          boxShadow: '0 8px 16px rgba(0, 0, 0, 0.15)',
+          width: '100%',
+          maxWidth: '500px',
+          minWidth: '320px'
         }}>
           <h1 style={{ 
             fontSize: '2.25rem',

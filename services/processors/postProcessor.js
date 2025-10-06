@@ -19,9 +19,9 @@ const SANTA_CLARA_LOCATIONS = {
     'Stanford Shopping Center',
     'Great Mall of the Bay Area',
     'San Jose City Hall',
-    'Valley Medical Center campus',
-    'Cisco Systems campus',
-    'Apple Park Visitor Center'
+    'Cisco Systems office building',
+    'Apple Park Visitor Center',
+    'downtown San Jose office building'
   ],
   public: [
     'Kelley Park',
@@ -231,14 +231,83 @@ class PostProcessor {
   }
 
   /**
+   * Apply neurologic-style speech: slurring, stutters, hesitations, mild word-finding issues.
+   * Severity: 1=mild, 2=moderate, 3=severe
+   */
+  static applyNeurologicSpeechStyle(text, severity = 2) {
+    if (!text || typeof text !== 'string') return text;
+
+    // Only transform quoted patient dialogue; preserve non-dialogue narration
+    const dialogueRegex = /"([^"]+)"/g;
+    return text.replace(dialogueRegex, (match, inner) => {
+      // Keep the final required closing line intact
+      const lower = inner.toLowerCase();
+      if (lower.includes('awaiting your next step')) return match;
+
+      let transformed = inner;
+
+      // Insert hesitations/ellipses based on severity
+      const hesitationRate = severity === 1 ? 0.08 : severity === 2 ? 0.14 : 0.22;
+      transformed = transformed.replace(/(\b\w{3,}\b)/g, (w) => {
+        if (Math.random() < hesitationRate) {
+          return w[0] + '… ' + w;
+        }
+        return w;
+      });
+
+      // Stutter on initial consonants for some words
+      const stutterRate = severity === 1 ? 0.06 : severity === 2 ? 0.12 : 0.2;
+      transformed = transformed.replace(/\b([bcdfghjklmnpqrstvwxyz])([a-z]{2,})/gi, (m, c, rest) => {
+        if (Math.random() < stutterRate) {
+          return `${c}-${c}${c}${rest}`;
+        }
+        return m;
+      });
+
+      // Slur endings: soften -ing, -er, -ed endings
+      const slurRate = severity === 1 ? 0.2 : severity === 2 ? 0.35 : 0.5;
+      transformed = transformed
+        .replace(/(\w+)ing\b/gi, (m, root) => (Math.random() < slurRate ? `${root}in'` : m))
+        .replace(/(\w+)er\b/gi, (m, root) => (Math.random() < slurRate ? `${root}uh` : m))
+        .replace(/(\w+)ed\b/gi, (m, root) => (Math.random() < slurRate ? `${root}e` : m));
+
+      // Occasional word-finding pauses
+      const pauseRate = severity === 1 ? 0.05 : severity === 2 ? 0.1 : 0.15;
+      transformed = transformed.replace(/(,|\.|\?|!)/g, (p) => (Math.random() < pauseRate ? '…' : p));
+
+      // Keep capitalization and punctuation roughly intact
+      return `"${transformed}"`;
+    });
+  }
+
+  /**
    * Post-process assistant text to enforce objective-only policy globally
    * @param {string} rawText - Raw AI response text
    * @param {string} userMessage - User message
    * @returns {string} - Processed text
    */
-  static postProcessObjectiveContent(rawText, userMessage) {
+  static postProcessObjectiveContent(rawText, userMessage, scenarioData = null) {
     if (!rawText || typeof rawText !== 'string') return rawText;
     let text = rawText;
+
+    // Apply condition-aware speech only when symptoms imply it and formatting rules allow
+    try {
+      const sub = (scenarioData?.subScenario || '').toLowerCase();
+      const symptoms = (scenarioData?.dispatchInfo?.symptoms || scenarioData?.generatedScenario?.presentation?.chiefComplaint || '').toLowerCase();
+      const main = (scenarioData?.mainScenario || '').toLowerCase();
+      const isNeurologic = /neuro|stroke|neurolog/.test(sub) || /neuro|stroke|neurolog/.test(main) || /slurred|confusion|confused|weakness|aphasia/.test(symptoms);
+
+      if (isNeurologic) {
+        // Determine severity influenced by scenario difficulty if available
+        const difficulty = scenarioData?.generatedScenario?.difficulty?.level || 'intermediate';
+        const severityByDifficulty = { novice: 1, intermediate: 2, advanced: 3 };
+        const baseSeverity = severityByDifficulty[(difficulty || 'intermediate').toLowerCase()] ?? 2;
+
+        text = PostProcessor.applyNeurologicSpeechStyle(text, baseSeverity);
+      }
+    } catch (_) {
+      // Fail quietly; default speech
+    }
 
     // Minimal fallback processing - most rules now handled by system prompt
     // Only keep essential formatting that AI might miss occasionally
@@ -354,7 +423,7 @@ class PostProcessor {
         // Optionally add presence sentence (50%) using seed
         const baseSeed = Math.floor(Math.abs(Number(seed))) || Date.now();
         const pronoun = gender === 'female' ? 'Her' : 'His';
-        const presenceOptions = ['husband', 'wife', 'roommate', 'family member', 'bystander', 'coworker'];
+        const presenceOptions = ['husband', 'wife', 'friend', 'family member', 'bystander', 'coworker'];
         const includePresence = (baseSeed % 2) === 0;
         if (includePresence) {
           const idx = baseSeed % presenceOptions.length;
@@ -564,7 +633,7 @@ class PostProcessor {
       
       // Presence sentence (50%) using seed
       const pronoun = gender === 'female' ? 'Her' : 'His';
-      const presenceOptions = ['husband', 'wife', 'roommate', 'family member', 'bystander', 'coworker'];
+      const presenceOptions = ['husband', 'wife', 'friend', 'family member', 'bystander', 'coworker'];
       const includePresence = (validSeed % 2) === 0;
       if (includePresence) {
         const idx = (validSeed + 7) % presenceOptions.length;

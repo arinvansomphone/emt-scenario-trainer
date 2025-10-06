@@ -137,7 +137,7 @@ Required JSON structure:
 {
   "patientProfile": {
     "age": <number>,
-    "gender": "<male/female>",
+    "gender": "<MUST match the gender specified in MANDATORY SCENARIO PARAMETERS>",
     "medicalHistory": ["<relevant conditions>"],
     "medications": ["<current medications>"],
     "allergies": ["<known allergies>"]
@@ -175,8 +175,8 @@ Required JSON structure:
     "skin": "<color, temperature, moisture>"
   },
   "dispatchInfo": {
-    "location": "<specific location type>",
-    "time": "<REQUIRED: specific time in format like '2:15 PM', '10:30 AM', etc. - NOT '<current time>' or placeholders>",
+    "location": "<MUST use the location type specified in MANDATORY SCENARIO PARAMETERS - create a specific named location of that type>",
+    "time": "<MUST use the EXACT time specified in MANDATORY SCENARIO PARAMETERS>",
     "callerInfo": "<who called 911>",
     "mechanism": "<REQUIRED: specific mechanism of injury OR observable symptoms - provide key symptoms without excessive detail. NO MEDICAL HISTORY. Examples: 'fell from ladder complaining of back pain', 'chest pain and shortness of breath', 'difficulty breathing after bee sting'>"
   },
@@ -206,12 +206,25 @@ Required JSON structure:
     ];
     const selectedAgeGroup = patientAgeGroups[Math.floor(Math.random() * patientAgeGroups.length)];
     
+    // Explicitly randomize patient gender
+    const genders = ["male", "female"];
+    const selectedGender = genders[Math.floor(Math.random() * genders.length)];
+    
+    // Explicitly generate a random time of day
+    const hours = Math.floor(Math.random() * 24); // 0-23
+    const minutes = Math.floor(Math.random() * 60); // 0-59
+    const period = hours >= 12 ? 'PM' : 'AM';
+    const displayHour = hours === 0 ? 12 : hours > 12 ? hours - 12 : hours;
+    const selectedTime = `${displayHour}:${minutes.toString().padStart(2, '0')} ${period}`;
+    
     // Generate more varied location types
     const locationTypes = [
       "residential home", "apartment complex", "office building", 
       "shopping mall", "restaurant", "public park", "sports facility",
       "school", "college campus", "retirement community", "highway",
-      "rural road", "hiking trail", "beach", "industrial site"
+      "rural road", "hiking trail", "beach", "industrial site",
+      "construction site", "warehouse", "hotel", "airport", 
+      "train station", "parking garage", "gas station", "library"
     ];
     const selectedLocation = locationTypes[Math.floor(Math.random() * locationTypes.length)];
     
@@ -227,9 +240,11 @@ ${subScenario.includes('Medical') || ['Respiratory Scenario', 'Cardiac Scenario'
 
 DIFFICULTY LEVEL: ${difficulty.name.toUpperCase()} (${difficulty.description})
 
-SCENARIO VARIATION PARAMETERS:
-- Patient demographic focus: ${selectedAgeGroup}
-- Location setting: ${selectedLocation}
+🚨 MANDATORY SCENARIO PARAMETERS - YOU MUST USE THESE EXACT VALUES:
+- Patient gender: ${selectedGender.toUpperCase()} (REQUIRED - do NOT change this)
+- Patient age group: ${selectedAgeGroup} (create specific age within this range)
+- Time of call: ${selectedTime} (REQUIRED - use this EXACT time in dispatchInfo)
+- Location type: ${selectedLocation} (REQUIRED - create a specific ${selectedLocation} location)
 - Scenario seed: ${uniqueSeed}
 
 Requirements:
