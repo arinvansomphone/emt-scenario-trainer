@@ -18,7 +18,7 @@
 
   color-scheme: light dark;
   color: rgba(255, 255, 255, 0.87);
-  background-color: #1e3a8a;
+  background-color: #3b82f6;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -40,7 +40,7 @@ body, #root {
   padding: 0 !important;
   min-width: 320px;
   min-height: 100vh;
-  background-color: #1e3a8a !important;
+  background-color: #3b82f6 !important;
 }
 
 h1 {
@@ -70,10 +70,10 @@ button:focus-visible {
 @media (prefers-color-scheme: light) {
   :root {
     color: rgba(255, 255, 255, 0.87);
-    background-color: #1e3a8a;
+    background-color: #3b82f6;
   }
   body, #root {
-    background-color: #1e3a8a !important;
+    background-color: #3b82f6 !important;
   }
   a:hover {
     color: #747bff;

@@ -53,6 +53,10 @@ class ChatService {
     this.scenarioEndReason = null;
     
     // Feedback mode removed
+    
+    // Intent classification cache (for hybrid conversation detection)
+    this.intentCache = new Map();
+    this.maxCacheSize = 100;
   }
 
   // ---------- Core vital signs generation (simplified) ----------
@@ -377,8 +381,16 @@ class ChatService {
   // ---------- Detect and respond to pulse/skin quality checks ----------
   detectPulseSkinRequest(userText) {
     const t = TextNormalizer.normalizeToAsciiLower(userText || '');
-    const wantsPulse = /(check|assess|feel|palpate|grab).*(radial|wrist|pulse)/.test(t) || /(pulse).*(quality|rate|regular|strong)/.test(t);
-    const wantsSkin = /(check|assess|look at|inspect).*(skin)/.test(t) || /(cap(illary)?\s*refill|crt)/.test(t);
+    
+    // Detect pulse checks - includes checking hand/wrist and pulse quality mentions
+    const wantsPulse = /(check|assess|feel|palpate|grab).*(radial|wrist|pulse|hand)/.test(t) || 
+                       /(pulse).*(quality|rate|regular|strong)/.test(t);
+    
+    // Detect skin checks - includes checking hand for skin condition
+    const wantsSkin = /(check|assess|look at|inspect|feel).*(skin)/.test(t) || 
+                      /(cap(illary)?\s*refill|crt)/.test(t) ||
+                      /(feel|check).*(hand).*(skin|quality)/.test(t);
+    
     const wantsAck = /(do\s+you\s+mind|is\s+it\s+(ok|okay|alright)|can\s+i|may\s+i|okay\s+if|ok\s+if|alright\s+if)/.test(t) || /\?\s*$/.test(t);
     return { wantsPulse, wantsSkin, wantsAck, any: wantsPulse || wantsSkin };
   }
@@ -477,6 +489,11 @@ class ChatService {
     return explicitTransportTo || codeOrPriority || decisionPhrase || lightsSirens || emergentWord;
   }
 
+  isHandoverReport(userText) {
+    const normalized = TextNormalizer.normalizeToAsciiLower(userText || '');
+    return /(handover|hand over|report|transport.*decision|my.*assessment|final.*report)/.test(normalized);
+  }
+
   extractTransportDetails(userText) {
     const t = TextNormalizer.normalizeToAsciiLower(userText || '');
     const codeMatch = t.match(/(code\s*[123]|priority\s*[123]|non[- ]?emergent|emergent)/);
@@ -490,7 +507,7 @@ class ChatService {
   }
 
   hasGeneralImpressionMarker(conversation) {
-    if (!Array.isArray(conversation)) return false;
+    if (!Array.isArray(conversation) || conversation.length === 0) return false;
     return conversation.some((m) => m && m.role === 'system' && typeof m.content === 'string' && m.content.includes('generalImpressionShown'));
   }
 
@@ -670,6 +687,12 @@ class ChatService {
   // ---------- Helper method to apply intervention effects ----------
   applyInterventionEffects(vitals, conversation) {
     const adjustedVitals = { ...vitals };
+    
+    // Safety check: ensure conversation is an array
+    if (!Array.isArray(conversation)) {
+      return adjustedVitals;
+    }
+    
     const allText = conversation.map(msg => msg.content || '').join(' ').toLowerCase();
     
     // Simple intervention detection
@@ -783,6 +806,9 @@ class ChatService {
   // ---------- Helper method to add scenario evolution context ----------
   addScenarioEvolutionContext(userMessage, conversation, scenarioData) {
     // Simple scenario evolution analysis for context
+    if (!Array.isArray(conversation)) {
+      return '';
+    }
     const userActions = conversation.filter(msg => msg.role === 'user');
     const conversationLength = userActions.length;
     
@@ -877,6 +903,27 @@ class ChatService {
     console.log('🔍 Starting generateResponse...');
     console.log('📝 Message length:', userMessage?.length || 0);
     console.log('🎭 Scenario data:', scenarioData);
+
+    // Auto-activate scenario if it exists but isn't marked active yet
+    // (This handles cases where frontend starts a scenario but backend state wasn't updated)
+    if (!this.currentScenarioActive && 
+        scenarioData?.generatedScenario && 
+        scenarioData?.meta?.startTime) {
+      const elapsedMs = Date.now() - scenarioData.meta.startTime;
+      const timeLimitMs = (scenarioData.meta.timeLimitMinutes || 20) * 60 * 1000;
+      
+      if (elapsedMs < timeLimitMs) {
+        console.log('🔄 Auto-activating scenario (frontend started but backend was inactive)');
+        this.currentScenarioActive = true;
+        this.scenarioStartTime = scenarioData.meta.startTime;
+        this.patientSimulator.initializePatient(scenarioData);
+        this.bystanderManager.generateBystanders(scenarioData);
+        this.environmentalManager.generateEnvironmentalFactors(scenarioData);
+        this.performanceEvaluator.startEvaluation(scenarioData, this.scenarioStartTime);
+      } else {
+        console.log('⏱️ Scenario has expired, not activating');
+      }
+    }
 
     // Feedback mode removed
 
@@ -1038,14 +1085,27 @@ class ChatService {
       // Early conversation handling: if the user is introducing themselves or
       // engaging in simple conversation, force a patient reply BEFORE any
       // action recognition to avoid unnecessary clarification prompts.
-      const earlyConversationCheck = this.isPatientConversation(userMessage);
+      const earlyConversationCheck = await this.isPatientConversation(userMessage);
       if (earlyConversationCheck.isPureConversation) {
         console.log('💬 Handling introduction/conversation before action recognition');
-        const additionalContext = 'PATIENT_CONVERSATION: Respond naturally as the patient to this introduction/conversation. Keep it short and in quotes.';
+        const additionalContext = 'PATIENT_CONVERSATION: The EMT is talking to you about their FUTURE plans, NOT performing an action right now. Respond naturally as the patient with just verbal acknowledgment. DO NOT describe any interventions being performed or any physical changes happening. Keep it short and in quotes. NO actions are being performed yet.';
         const messages = await this.createMessages(userMessage, conversation, scenarioData, null, additionalContext);
         const response = await this.callOpenAI(messages);
         let sanitized = PostProcessor.postProcessObjectiveContent(response, userMessage, scenarioData);
-        return { response: sanitized, additionalMessages: [], enhancedScenarioData: scenarioData };
+        
+        // If this is an intent statement (future tense), strip out any narrative after the patient quote
+        if (earlyConversationCheck.isIntent) {
+          console.log('🔧 Intent detected - stripping narrative from response');
+          sanitized = this.stripNarrativeFromIntent(sanitized);
+        }
+        
+        const prevConversation = Array.isArray(conversation) ? conversation : [];
+        const updatedConversation = [
+          ...prevConversation,
+          { role: 'user', content: userMessage },
+          { role: 'assistant', content: sanitized }
+        ];
+        return { response: sanitized, conversation: updatedConversation, additionalMessages: [], enhancedScenarioData: scenarioData };
       }
 
       // Check for physical exam assessment intent
@@ -1062,6 +1122,39 @@ class ChatService {
         return await this.handleExamAssessmentAnswer(userMessage, conversation, scenarioData, sessionId);
       }
 
+      // Check for equipment placement FIRST (before action recognition processing)
+      const equipmentPlacement = this.detectEquipmentPlacement(userMessage);
+      if (equipmentPlacement.detected) {
+        let response;
+        
+        // For pulse oximeter, only provide the reading without patient response
+        // This avoids giving hints about the quality of the SpO2 value
+        if (equipmentPlacement.equipmentType === 'pulse_oximeter') {
+          if (equipmentPlacement.providesReading) {
+            const reading = this.patientSimulator.getSpecificVital(equipmentPlacement.readingType);
+            response = `${reading}\n\nAwaiting your next step.`;
+          }
+        } else {
+          // For other equipment, include patient response
+          const patientResponse = this.patientSimulator.generatePatientResponse(userMessage, scenarioData);
+          response = patientResponse;
+          
+          // Automatically provide readings for monitoring equipment
+          if (equipmentPlacement.providesReading) {
+            const reading = this.patientSimulator.getSpecificVital(equipmentPlacement.readingType);
+            response += `\n\n${reading}`;
+          }
+          
+          response += '\n\nAwaiting your next step.';
+        }
+        
+        return {
+          response,
+          additionalMessages: [],
+          enhancedScenarioData: scenarioData
+        };
+      }
+
       const recognizedAction = this.actionRecognizer.recognizeAction(userMessage);
       
       // Log action for performance evaluation
@@ -1070,6 +1163,41 @@ class ChatService {
       // Record interventions in patient simulator
       if (recognizedAction.type === 'medicationAdmin' || recognizedAction.type === 'equipmentUse') {
         this.patientSimulator.recordIntervention(userMessage, Date.now());
+      }
+      
+      // Handle scene safety actions (PPE, BSI precautions)
+      if (recognizedAction.type === 'sceneSafety') {
+        console.log('🦺 Scene safety action recognized:', recognizedAction.details);
+        const ppeAck = this.generateSceneSafetyAcknowledgment(recognizedAction.details);
+        return {
+          response: `${ppeAck}\n\nAwaiting your next step.`,
+          additionalMessages: [],
+          enhancedScenarioData: scenarioData
+        };
+      }
+      
+      // Handle supportive care actions (emesis bag, blanket, water, etc.)
+      if (recognizedAction.type === 'supportiveCare') {
+        console.log('🤲 Supportive care action recognized:', recognizedAction.details);
+        const supportiveAck = await this.generateSupportiveCareAcknowledgment(recognizedAction.details, scenarioData);
+        return {
+          response: supportiveAck,
+          additionalMessages: [],
+          enhancedScenarioData: scenarioData
+        };
+      }
+      
+      // Handle oxygen administration actions
+      if (recognizedAction.type === 'oxygenAdmin') {
+        console.log('💨 Oxygen administration recognized:', recognizedAction.details);
+        const oxygenAck = await this.generateOxygenAdminAcknowledgment(recognizedAction.details, scenarioData);
+        // Record intervention for vitals update
+        this.patientSimulator.recordIntervention(userMessage, Date.now());
+        return {
+          response: oxygenAck,
+          additionalMessages: [],
+          enhancedScenarioData: scenarioData
+        };
       }
       
       // Check for contraindications
@@ -1142,30 +1270,6 @@ class ChatService {
       }
     }
 
-    // Handle equipment placement with automatic readings
-    if (this.currentScenarioActive) {
-      const equipmentPlacement = this.detectEquipmentPlacement(userMessage);
-      if (equipmentPlacement.detected) {
-        const patientResponse = this.patientSimulator.generatePatientResponse(userMessage, scenarioData);
-        
-        let response = patientResponse;
-        
-        // Automatically provide readings for monitoring equipment
-        if (equipmentPlacement.providesReading) {
-          const reading = this.patientSimulator.getSpecificVital(equipmentPlacement.readingType);
-          response += `\n\n${reading}`;
-        }
-        
-        response += '\n\nAwaiting your next step.';
-        
-        return {
-          response,
-          additionalMessages: [],
-          enhancedScenarioData: scenarioData
-        };
-      }
-    }
-
 
 
     // Transport decision: note decision and repeat reason only (objective)
@@ -1184,7 +1288,7 @@ class ChatService {
 
     // Handle active scenario interactions OR conversation during any scenario
     let additionalContext = null;
-    const conversationCheckForScenario = this.isPatientConversation(userMessage);
+    const conversationCheckForScenario = await this.isPatientConversation(userMessage);
     if (this.currentScenarioActive || (scenarioData?.generatedScenario && conversationCheckForScenario.isConversation)) {
       console.log('🏥 Processing user interaction...', { 
         scenarioActive: this.currentScenarioActive, 
@@ -1217,7 +1321,7 @@ class ChatService {
       }
       
       // Check if this is conversation and/or action
-      const conversationCheck = this.isPatientConversation(userMessage);
+      const conversationCheck = await this.isPatientConversation(userMessage);
       console.log('🔍 Conversation check:', { userMessage, conversationCheck });
       
       // Recognize and process any medical action
@@ -1237,14 +1341,8 @@ class ChatService {
           );
           if (contraindication) {
             // Patient shows adverse reaction
-            this.patientSimulator.applyIntervention(actionResult.type, actionResult, false);
             actionContext = `CONTRAINDICATION ALERT: ${contraindication}`;
-          } else {
-            this.patientSimulator.applyIntervention(actionResult.type, actionResult, true);
           }
-        } else if (actionResult.type !== 'unclear') {
-          // Apply intervention effect
-          this.patientSimulator.applyIntervention(actionResult.type, actionResult, true);
         }
         
         // Handle vitals requests specifically
@@ -1295,7 +1393,13 @@ class ChatService {
     if (pulseSkinReq.any) {
       const findings = this.formatPulseSkinResponse(pulseSkinReq, scenarioData);
       const response = `${findings}\n\nAwaiting your next step.`;
-      return { response, additionalMessages: [], enhancedScenarioData: scenarioData };
+      const prevConversation = Array.isArray(conversation) ? conversation : [];
+      const updatedConversation = [
+        ...prevConversation,
+        { role: 'user', content: userMessage },
+        { role: 'assistant', content: response }
+      ];
+      return { response, conversation: updatedConversation, additionalMessages: [], enhancedScenarioData: scenarioData };
     }
 
     // Immediate region findings when user checks/assesses body parts
@@ -1303,7 +1407,13 @@ class ChatService {
     if (regionChecks.length > 0) {
       const findings = this.formatRegionFindings(regionChecks, scenarioData);
       const response = `${findings}\n\nAwaiting your next step.`;
-      return { response, additionalMessages: [], enhancedScenarioData: scenarioData };
+      const prevConversation = Array.isArray(conversation) ? conversation : [];
+      const updatedConversation = [
+        ...prevConversation,
+        { role: 'user', content: userMessage },
+        { role: 'assistant', content: response }
+      ];
+      return { response, conversation: updatedConversation, additionalMessages: [], enhancedScenarioData: scenarioData };
     }
 
     // Standard LLM response generation
@@ -1315,7 +1425,7 @@ class ChatService {
 
     // Check if this is the first message in a scenario (no previous conversation)
     if (!conversation || conversation.length === 0) {
-      sanitized = PostProcessor.enforceInitialDispatchMessage(sanitized, scenarioData);
+      sanitized = await PostProcessor.enforceInitialDispatchMessage(sanitized, scenarioData);
     }
 
     // Add bystander response if generated
@@ -1335,8 +1445,17 @@ class ChatService {
       // Time warnings disabled per requirements
     }
 
+    // Build updated conversation array
+    const prevConversation = Array.isArray(conversation) ? conversation : [];
+    const updatedConversation = [
+      ...prevConversation,
+      { role: 'user', content: userMessage },
+      { role: 'assistant', content: finalResponse }
+    ];
+
     return { 
-      response: finalResponse, 
+      response: finalResponse,
+      conversation: updatedConversation,
       additionalMessages: [],
       enhancedScenarioData: scenarioData // Pass back the enhanced scenario data
     };
@@ -1351,24 +1470,24 @@ class ChatService {
     // System message (now async)
     let systemMessage = await this.buildSystemMessage(scenarioData, evolutionAnalysis);
     
-    // Add additional context if provided
-    if (additionalContext) {
-      console.log('🩺 System Message Debug - Adding context to system message');
-      systemMessage += `\n\nADDITIONAL CONTEXT: ${additionalContext}`;
-    } else {
-      console.log('🩺 System Message Debug - No additional context to add');
-    }
-    
     // Add current vital signs for the LLM to use when responding to vitals requests
     if (scenarioData) {
       const vitalsContext = this.generateContextAwareVitals(conversation, scenarioData);
       systemMessage += `\n\nCURRENT VITAL SIGNS: ${vitalsContext}`;
     }
     
+    // Add additional context LAST (if provided) so it has the most weight
+    if (additionalContext) {
+      console.log('🩺 System Message Debug - Adding context to system message (LAST for maximum weight)');
+      systemMessage += `\n\n⚠️ CRITICAL INSTRUCTION FOR THIS RESPONSE: ${additionalContext}`;
+    } else {
+      console.log('🩺 System Message Debug - No additional context to add');
+    }
+    
     messages.push({ role: 'system', content: systemMessage });
 
-    // Add conversation history
-    if (Array.isArray(conversation)) {
+    // Add conversation history (ensure it's an array)
+    if (Array.isArray(conversation) && conversation.length > 0) {
       messages.push(...conversation);
     }
 
@@ -1504,54 +1623,59 @@ ACKNOWLEDGMENT STYLE:
 37. Always put acknowledgments in quotation marks and end with appropriate punctuation
 
 INTERVENTION RESPONSES:
-38. When EMT gives oxygen therapy (nasal cannula, mask, BVM): Show improvement in breathing and SpO2, feel more comfortable
-39. When EMT gives aspirin for chest pain: Show gradual improvement in chest pain and anxiety
-40. When EMT gives albuterol/nebulizer: Show improvement in breathing, may have slight increased heart rate as side effect
-41. When EMT positions you upright: Show improvement in breathing and comfort
-42. When EMT gives IV fluids: Show improvement in overall condition and energy
-43. When EMT gives epinephrine: Show rapid improvement in severe symptoms
-44. Show deterioration if critical interventions are delayed or missed
-45. Respond to intervention quality - better technique = better results
+38. CRITICAL: Only respond to interventions when they are ACTUALLY BEING PERFORMED (actions), NOT when they are mentioned as future plans
+   - If EMT says "I'm gonna give you oxygen" or "I'm going to apply oxygen" or "I'll give you oxygen" → respond with ONLY a verbal acknowledgment in quotes, DO NOT add any narrative about the intervention being performed
+   - WRONG: "Okay" + "As the oxygen is placed on her nose, she breathes easier"
+   - CORRECT: "Okay, I understand"
+   - If EMT says "I apply oxygen at 4 LPM" or "I place the nasal cannula on your nose" → NOW show the intervention effects with narrative
+39. When EMT ACTUALLY gives oxygen therapy (nasal cannula, mask, BVM): Show improvement in breathing and SpO2, feel more comfortable
+40. When EMT ACTUALLY gives aspirin for chest pain: Show gradual improvement in chest pain and anxiety
+41. When EMT ACTUALLY gives albuterol/nebulizer: Show improvement in breathing, may have slight increased heart rate as side effect
+42. When EMT ACTUALLY positions you upright: Show improvement in breathing and comfort
+43. When EMT ACTUALLY gives IV fluids: Show improvement in overall condition and energy
+44. When EMT ACTUALLY gives epinephrine: Show rapid improvement in severe symptoms
+45. Show deterioration if critical interventions are delayed or missed
+46. Respond to intervention quality - better technique = better results
 
 RESPONSE GUIDELINES:
-46. If asked about symptoms, describe them as the patient would
-47. If asked about medical history, respond as the patient would
-48. If asked about medications, respond as the patient would
-49. If asked about allergies, respond as the patient would
-50. For physical exams: React appropriately to being touched, examined, or having equipment used
-51. Cooperate with medical procedures unless your condition prevents it
+47. If asked about symptoms, describe them as the patient would
+48. If asked about medical history, respond as the patient would
+49. If asked about medications, respond as the patient would
+50. If asked about allergies, respond as the patient would
+51. For physical exams: React appropriately to being touched, examined, or having equipment used
+52. Cooperate with medical procedures unless your condition prevents it
 
 CONVERSATION AND INTRODUCTION HANDLING:
-52. When EMT introduces themselves: Respond naturally as the patient would, acknowledging their presence
-53. When EMT says "Hi" or greets you: Respond with appropriate patient greeting based on your condition
-54. When EMT asks "what's the problem": Describe your chief complaint and current symptoms
-55. NEVER ask for clarification on introductions, greetings, or basic conversation
-56. Always respond in character as the patient, even for simple interactions
-57. Example responses to "Hi I'm John, I'm an EMT":
+53. When EMT introduces themselves: Respond naturally as the patient would, acknowledging their presence
+54. When EMT says "Hi" or greets you: Respond with appropriate patient greeting based on your condition
+55. When EMT asks "what's the problem": Describe your chief complaint and current symptoms
+56. NEVER ask for clarification on introductions, greetings, or basic conversation
+57. Always respond in character as the patient, even for simple interactions
+58. Example responses to "Hi I'm John, I'm an EMT":
     - Alert patient: "Oh thank goodness you're here! I'm really worried about..."
     - Anxious patient: "Please help me, I don't know what's happening..."
     - Confused patient: "Who... who are you? I'm so confused..."
 
 SCENARIO EVOLUTION:
-58. Show natural progression of your condition based on time and interventions
-59. If critical interventions are delayed: Show gradual deterioration (increased symptoms, decreased cooperation)
-60. If appropriate interventions are given: Show improvement (decreased symptoms, increased cooperation)
-61. If inappropriate interventions are given: Show no improvement or slight worsening
-62. Show complications if critical interventions are missed (e.g., cardiac arrest if aspirin delayed for chest pain)
-63. Respond to intervention quality - better technique = better results
-64. Show realistic time-based changes (condition may worsen if untreated for too long)
-65. Maintain consistency with your initial presentation and medical condition
+59. Show natural progression of your condition based on time and interventions
+60. If critical interventions are delayed: Show gradual deterioration (increased symptoms, decreased cooperation)
+61. If appropriate interventions are given: Show improvement (decreased symptoms, increased cooperation)
+62. If inappropriate interventions are given: Show no improvement or slight worsening
+63. Show complications if critical interventions are missed (e.g., cardiac arrest if aspirin delayed for chest pain)
+64. Respond to intervention quality - better technique = better results
+65. Show realistic time-based changes (condition may worsen if untreated for too long)
+66. Maintain consistency with your initial presentation and medical condition
 
 VITAL SIGNS GENERATION:
-66. Generate realistic vital signs based on your medical condition and scenario type
-67. Cardiac conditions: Show elevated heart rate, blood pressure changes, normal to slightly low SpO2
-68. Respiratory conditions: Show elevated respiratory rate, decreased SpO2, normal heart rate
-69. Trauma conditions: Show elevated heart rate, normal to elevated blood pressure, normal SpO2
-70. Neurologic conditions: Show normal vital signs unless severe, may have altered mental status
-71. Metabolic conditions: Show variable vital signs based on specific condition
-72. Show vital sign changes based on interventions (oxygen improves SpO2, aspirin may lower heart rate)
-73. Maintain realistic ranges: HR 40-200, RR 8-50, BP 60/40-250/150, SpO2 70-100%, Temp 95-106°F
-74. Show gradual improvement or deterioration based on intervention quality and timing
+67. Generate realistic vital signs based on your medical condition and scenario type
+68. Cardiac conditions: Show elevated heart rate, blood pressure changes, normal to slightly low SpO2
+69. Respiratory conditions: Show elevated respiratory rate, decreased SpO2, normal heart rate
+70. Trauma conditions: Show elevated heart rate, normal to elevated blood pressure, normal SpO2
+71. Neurologic conditions: Show normal vital signs unless severe, may have altered mental status
+72. Metabolic conditions: Show variable vital signs based on specific condition
+73. Show vital sign changes based on interventions (oxygen improves SpO2, aspirin may lower heart rate)
+74. Maintain realistic ranges: HR 40-200, RR 8-50, BP 60/40-250/150, SpO2 70-100%, Temp 95-106°F
+75. Show gradual improvement or deterioration based on intervention quality and timing
 
 SCENARIO CONTEXT:`;
 
@@ -1565,14 +1689,18 @@ Patient ID: ${scenarioData.sunetId || 'Unknown'}`;
       // Add comprehensive scenario details if available
       if (scenarioData.generatedScenario) {
         const gs = scenarioData.generatedScenario;
+        const pp = gs.patientProfile || {};
+        const medicalHistoryStr = Array.isArray(pp.medicalHistory) ? pp.medicalHistory.join(', ') : (pp.medicalHistory ?? 'Unknown');
+        const medicationsStr = Array.isArray(pp.medications) ? pp.medications.join(', ') : (pp.medications ?? 'None known');
+        const allergiesStr = Array.isArray(pp.allergies) ? pp.allergies.join(', ') : (pp.allergies ?? 'NKDA');
         systemMessage += `
 
 DETAILED PATIENT INFORMATION:
-- Age: ${gs.patientProfile?.age || 'Unknown'} years old
-- Gender: ${gs.patientProfile?.gender || 'Unknown'}
-- Medical History: ${gs.patientProfile?.medicalHistory?.join(', ') || 'Unknown'}
-- Current Medications: ${gs.patientProfile?.medications?.join(', ') || 'None known'}
-- Allergies: ${gs.patientProfile?.allergies?.join(', ') || 'NKDA'}
+- Age: ${pp.age || 'Unknown'} years old
+- Gender: ${pp.gender || 'Unknown'}
+- Medical History: ${medicalHistoryStr}
+- Current Medications: ${medicationsStr}
+- Allergies: ${allergiesStr}
 - Chief Complaint: ${gs.presentation?.chiefComplaint || 'Unknown'}
 - Symptom Onset: ${gs.presentation?.onsetTime || 'Unknown'}
 - Current Condition: ${gs.physicalFindings?.consciousness || 'Alert'}
@@ -1729,12 +1857,17 @@ ${this.buildEvolutionContext(evolutionAnalysis)}`;
 
   async generateScoredFeedback(conversation, scenarioData) {
     try {
+      // Safety check for conversation
+      const conversationText = Array.isArray(conversation)
+        ? conversation.map(msg => `${msg.role}: ${msg.content}`).join('\n')
+        : 'No conversation data';
+      
       const feedbackPrompt = `Based on the following EMT scenario conversation, provide structured feedback and scoring:
 
 Scenario: ${scenarioData?.mainScenario || 'Medical'} - ${scenarioData?.subScenario || 'General'}
 
 Conversation:
-${conversation.map(msg => `${msg.role}: ${msg.content}`).join('\n')}
+${conversationText}
 
 Please provide:
 1. Overall assessment (1-10 scale)
@@ -1743,27 +1876,47 @@ Please provide:
 4. Specific recommendations
 5. Final score and justification
 
-Format as JSON with keys: assessment, strengths, improvements, recommendations, score, justification`;
+Format your response as valid JSON only, with exactly these keys: assessment (string), strengths (array of strings), improvements (array of strings), recommendations (array of strings), score (number 1-10), justification (string). Do not wrap the JSON in markdown code blocks or add any text outside the JSON.`;
 
       const messages = [
-        { role: 'system', content: 'You are an expert EMT instructor providing structured feedback.' },
+        { role: 'system', content: 'You are an expert EMT instructor. You must respond with valid JSON only, no markdown or explanation.' },
         { role: 'user', content: feedbackPrompt }
       ];
 
       const response = await this.callOpenAI(messages);
+      const raw = (response && typeof response === 'string') ? response.trim() : '';
+
+      // Strip markdown code blocks if present (e.g. ```json ... ```)
+      let jsonStr = raw;
+      const codeBlockMatch = raw.match(/^```(?:json)?\s*([\s\S]*?)```$/m);
+      if (codeBlockMatch) {
+        jsonStr = codeBlockMatch[1].trim();
+      }
 
       try {
-        return JSON.parse(response);
+        const parsed = JSON.parse(jsonStr);
+        if (parsed && typeof parsed.assessment === 'string' && typeof parsed.score === 'number') {
+          return {
+            assessment: parsed.assessment,
+            strengths: Array.isArray(parsed.strengths) ? parsed.strengths : [],
+            improvements: Array.isArray(parsed.improvements) ? parsed.improvements : [],
+            recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations : [],
+            score: Math.min(10, Math.max(1, Number(parsed.score))) || 5,
+            justification: typeof parsed.justification === 'string' ? parsed.justification : ''
+          };
+        }
       } catch (parseError) {
-        return {
-          assessment: 'Unable to parse feedback',
-          strengths: [],
-          improvements: [],
-          recommendations: [],
-          score: 5,
-          justification: 'Error parsing feedback response'
-        };
+        console.warn('Feedback JSON parse failed:', parseError.message, 'Raw snippet:', jsonStr.slice(0, 200));
       }
+
+      return {
+        assessment: 'Unable to parse feedback',
+        strengths: [],
+        improvements: [],
+        recommendations: [],
+        score: 5,
+        justification: 'Error parsing feedback response'
+      };
     } catch (error) {
       console.error('❌ Failed to generate scored feedback:', error);
       return {
@@ -1791,127 +1944,203 @@ Format as JSON with keys: assessment, strengths, improvements, recommendations, 
   }
 
   /**
-   * Detect if user message is patient conversation rather than medical action
+   * Generate acknowledgment for scene safety actions
+   * @param {Object} actionDetails - Scene safety action details
+   * @returns {string} - Acknowledgment message
    */
-  isPatientConversation(userMessage) {
-    const message = userMessage.toLowerCase().trim();
+  generateSceneSafetyAcknowledgment(actionDetails) {
+    const { ppeItems, safetyAction } = actionDetails;
     
-    console.log('🔍 Checking if patient conversation:', { message });
+    // Generate acknowledgment based on what PPE was donned
+    if (safetyAction === 'donning' && ppeItems && ppeItems.length > 0) {
+      const items = ppeItems.map(item => {
+        switch (item) {
+          case 'gloves': return 'gloves';
+          case 'mask': return 'mask';
+          case 'gown': return 'gown';
+          case 'eyeProtection': return 'eye protection';
+          case 'ppe': return 'PPE';
+          case 'general': return 'protective equipment';
+          default: return item;
+        }
+      });
+      
+      if (items.length === 1) {
+        return `${items[0].charAt(0).toUpperCase() + items[0].slice(1)} donned.`;
+      } else if (items.length === 2) {
+        return `${items[0].charAt(0).toUpperCase() + items[0].slice(1)} and ${items[1]} donned.`;
+      } else {
+        return 'PPE donned.';
+      }
+    }
     
-    // Introduction patterns
-    const introPatterns = [
-      /^(hi|hello|hey)\b/,
-      /\bi'?m\s+\w+/,  // "I'm John", "I'm a paramedic"
-      /my name is/,
-      /\bcall me\b/,
-      /\bintroduce\b/,
-      /\bemt\b.*\bhere\b/,
-      /\bparamedic\b.*\bhere\b/,
-      /\bwith\s+(the\s+)?ambulance/,
-      /\bwe'?re\s+here\s+to\s+help/,
-      /\bhow\s+are\s+you\s+(doing|feeling)/,
-      /\bwhat'?s\s+your\s+name/,
-      /\bwhat\s+is\s+your\s+name/,
-      /\bcan\s+you\s+tell\s+me\s+your\s+name/,
-      /\byour\s+name(?:\s+(?:sir|ma'am|please))?/,
-      /\bwhat\s+is\s+your\s+name\s+sir/,
-      /\bwhat\s+is\s+your\s+name\s+ma'am/
-    ];
+    // Other scene safety acknowledgments
+    if (safetyAction === 'assessment') {
+      return 'Scene assessed for safety.';
+    }
     
-    // Conversational patterns
-    const conversationPatterns = [
-      /\bhow\s+old\s+are\s+you/,
-      /\bwhat\s+happened/,
-      /\bcan\s+you\s+tell\s+me\s+what/,
-      /\bwhen\s+did\s+this\s+start/,
-      /\bhave\s+you\s+had\s+this\s+before/,
-      /\bare\s+you\s+allergic/,
-      /\bdo\s+you\s+take\s+any\s+medications/,
-      /\bwhat\s+medications/,
-      /\bany\s+medical\s+history/,
-      /\bwhere\s+does\s+it\s+hurt/,
-      /\bwhat\s+does\s+the\s+pain\s+feel\s+like/,
-      /\bon\s+a\s+scale\s+of/,
-      /\brate\s+your\s+pain/,
-      /\bwhat\s+seems\s+to\s+be\s+the\s+problem/,
-      /\bwhat'?s\s+the\s+problem/,
-      /\bwhat'?s\s+going\s+on/,
-      /\bwhat'?s\s+wrong/,
-      // Orientation questions (neuro checks)
-      /\b(do\s+you\s+remember|do\s+you\s+know)\s+where\s+you\s+are\b/,
-      /\bwhere\s+are\s+you\s+(now|right\s+now)?\b/,
-      /\bwhat\s+city\b|\bwhat\s+state\b|\bwhat\s+year\b|\bwhat\s+day\b|\bwhat\s+is\s+today'?s\s+date\b/,
-      /\bwho\s+is\s+(the\s+)?president\b/,
-      // Time orientation
-      /\b(do\s+you\s+remember|do\s+you\s+know)\s+(what\s+)?time(\s+of\s+day)?\b/,
-      /\bwhat\s+time(\s+of\s+day)?\b/,
-      /\bwhat\s+month\b/,
-      /\bwhat\s+day\s+of\s+the\s+week\b/,
-      // Direct reassurance and conversational phrases
-      /\bwe'?ll\s+get\s+(?:that|this|you)\s+sorted/,
-      /\bwe'?re\s+(?:here\s+to\s+help|going\s+to\s+take\s+care)/,
-      /\blet'?s\s+get\s+you\s+(?:sorted|fixed\s+up|taken\s+care\s+of)/,
-      /\bdon'?t\s+worry/,
-      /\bwe'?re\s+going\s+to\s+help/,
-      /\bcan\s+i\s+help\s+you\b/,
-      /\bcan\s+i\s+assist\s+you\b/,
-      // Direct patient requests (asking patient to do something)
-      /\bcan\s+you\s+(?:open|close|lift|raise|lower|move|turn|show|squeeze)/,
-      /\bplease\s+(?:open|close|lift|raise|lower|move|turn|show|squeeze)/,
-      /\b(?:open|close|lift|raise|squeeze)\s+your\s+(?:mouth|eyes|hand|arm|leg)/,
-      // Offering assistance/comfort items
-      /\bwould\s+you\s+like\s+(?:a|some|an)/,
-      /\bdo\s+you\s+want\s+(?:a|some|an)/,
-      /\bdo\s+you\s+need\s+(?:a|some|an)/,
-      /\bcan\s+i\s+get\s+you\s+(?:a|some|an)/,
-      // Intent/future statements (announcing what you're about to do)
-      /\bi'?m\s+(?:going\s+to|gonna)\s+/,
-      /\bi\s+will\s+/,
-      /\bi'?ll\s+/,
-      /\blet\s+me\s+/,
-      // History-taking phrases (OPQRST-style)
-      /\bwhen\s+did\s+(?:it|this|that)\s+(?:start|begin)\b/,
-      /\bwhen\s+did\s+(?:your|the)\s+[a-z\s]+\s+(?:start|begin)\b/,
-      /\bhow\s+long\s+(?:have\s+you\s+had|has\s+this\s+been\s+going\s+on)\b/,
-      /\bwhat\s+makes\s+(?:it|this|that)\s+(?:better|worse)\b/,
-      /\bdoes\s+anything\s+make\s+(?:it|this|that)\s+(?:better|worse)\b/,
-      /\bwhat\s+were\s+you\s+doing\s+when\b/
-    ];
+    if (safetyAction === 'confirmation') {
+      return 'Scene safety confirmed.';
+    }
     
-    // Check if it matches conversation patterns
-    const isConversation = [...introPatterns, ...conversationPatterns].some(pattern => 
-      pattern.test(message)
+    // Default acknowledgment
+    return 'PPE in place.';
+  }
+
+  /**
+   * Generate acknowledgment for supportive care actions
+   * Provides both patient response and moderator confirmation
+   * @param {Object} actionDetails - Supportive care action details
+   * @param {Object} scenarioData - Current scenario data
+   * @returns {Promise<string>} - Acknowledgment message with patient response
+   */
+  async generateSupportiveCareAcknowledgment(actionDetails, scenarioData) {
+    const { careItem, careAction } = actionDetails;
+    
+    // Generate patient response based on their condition
+    const patientResponse = await this.patientSimulator.generatePatientResponse(
+      `You are being given ${careItem}`, 
+      scenarioData
     );
     
-    console.log('🔍 Pattern match result:', { isConversation });
+    // Generate moderator confirmation
+    let moderatorConfirmation = '';
+    if (careAction === 'providing' || careAction === 'getting') {
+      moderatorConfirmation = `${careItem.charAt(0).toUpperCase() + careItem.slice(1)} provided to patient.`;
+    } else if (careAction === 'placing') {
+      moderatorConfirmation = `${careItem.charAt(0).toUpperCase() + careItem.slice(1)} placed nearby.`;
+    }
     
-    // Check for action words that indicate medical assessment/intervention
-    // These indicate the message contains an actionable medical task
-    const actionWordPatterns = [
-      /\bcheck\s+(?:vitals|pulse|blood pressure|bp|breathing|temperature|airway|for)/,
-      /\btake\s+(?:vitals|pulse|blood pressure|temperature|measurements)/,
-      /\bget\s+(?:vitals|pulse|blood pressure|equipment|stretcher|iv|medication)/,
-      /\bobtain\s+(?:vitals|history|iv)/,
-      /\bmeasure\s+(?:vitals|pulse|blood pressure)/,
-      /\blisten\s+(?:to\s+)?(?:lungs|heart|breathing|chest)/,
-      /\bfeel\s+(?:pulse|for)/,
-      /\bpalpate\b/,
-      /\bassess\s+(?:airway|breathing|circulation)/,
-      /\bcheck\s+(?:the\s+)?airway\b/,
-      /\binspect\s+(?:the\s+)?airway\b/,
-      /\bopen\s+(?:your|the)\s+mouth.*(?:check|airway|look)/,
-      /\bvitals\b/, /\bpulse\b/, /\bblood pressure\b/, /\bbp\b/, /\bheart rate\b/, /\bhr\b/, /\btemperature\b/,
-      /\boxygen\b/, /\bo2\b/, /\bspo2\b/, /\brespiratory rate\b/, /\brr\b/,
-      /\biv\b/, /\bmedication\b/, /\bdrug\b/,
-      /\bgive\s+(?:medication|drug|iv|oxygen)/,
-      /\badminister\b/, /\binject\b/,
-      /\btransport\s+(?:to|patient)/, /\bmove\s+(?:patient)/, /\blift\s+(?:patient)/, /\bposition\s+(?:patient)/, /\bimmobilize\b/
+    // Combine patient response and moderator confirmation
+    return `${patientResponse}\n\n${moderatorConfirmation}\n\nAwaiting your next step.`;
+  }
+
+  async generateOxygenAdminAcknowledgment(actionDetails, scenarioData) {
+    const { flowRate, deliveryMethod } = actionDetails;
+    
+    // Generate moderator confirmation with specific details (no patient response)
+    const flowInfo = flowRate !== 'unspecified flow rate' ? ` at ${flowRate}` : '';
+    const moderatorConfirmation = `Oxygen administered via ${deliveryMethod}${flowInfo}. Patient has accepted the treatment.`;
+    
+    // Return only moderator confirmation
+    return `${moderatorConfirmation}\n\nAwaiting your next step.`;
+  }
+
+  // ---------- HYBRID CONVERSATION DETECTION SYSTEM ----------
+  
+  /**
+   * Check for obvious medical actions (high confidence)
+   */
+  hasObviousAction(message) {
+    const normalized = message.toLowerCase().trim();
+    
+    // Strong action indicators - these are almost always medical actions
+    const strongActionPatterns = [
+      /\b(place|apply|attach|insert|start|administer|give)\s+(iv|intravenous|medication|drug|oxygen|nasal cannula|non-rebreather)/,
+      /\b(check|take|get|obtain|measure)\s+(vitals|blood pressure|bp|heart rate|pulse|temperature|respiratory rate)/,
+      /\b(listen|auscultate)\s+(to\s+)?(lungs|heart|chest|breathing|breath sounds)/,
+      /\bpalpate\s+(abdomen|chest|pulse|radial|carotid)/,
+      /\b(start|initiate|establish)\s+(an\s+)?iv\b/,
+      /\b(administer|give)\s+\d+\s*(mg|mcg|ml|units|liters)/,
+      /\bimmobilize\s+(c-spine|cervical|spine|neck|extremity)/,
+      /\b(apply|place)\s+(tourniquet|splint|dressing|bandage|collar)/,
+      /\b(transport|move)\s+to\s+(hospital|ambulance|stretcher)/,
     ];
     
-    let hasActionWords = actionWordPatterns.some(pattern => pattern.test(message));
+    return strongActionPatterns.some(pattern => pattern.test(normalized));
+  }
+  
+  /**
+   * Check for obvious conversation (high confidence)
+   */
+  hasObviousConversation(message) {
+    const normalized = message.toLowerCase().trim();
     
-    // Check for intent/future tense statements - these should NOT trigger actions
-    // e.g., "I'm gonna place a pulse oximeter" vs "I placed a pulse oximeter"
+    // Strong conversation indicators - these are almost always patient interaction
+    const strongConversationPatterns = [
+      /^(hi|hello|hey)\b/,  // Greetings at start
+      /\bmy name is\b/,  // Introduction
+      /\bi'?m\s+\w+\s+(from|with)\s+(the\s+)?(ambulance|ems|paramedics?|emt)/,  // EMT introduction
+      /\b(what|can you tell me)\s+(is\s+)?(your|the)\s+name\b/,  // Name questions
+      /\b(how\s+old|what'?s\s+your\s+age)\b/,  // Age questions
+      /\bwhat\s+(happened|seems\s+to\s+be\s+the\s+problem|brings\s+you|'?s\s+going\s+on)\b/,  // Chief complaint
+      /\b(when|how\s+long)\s+did\s+(this|that|it)\s+start\b/,  // Onset questions
+      /\b(do\s+you\s+have|have\s+you\s+had|any)\s+(medical\s+history|allergies|medications)\b/,  // History
+      /\b(where|can\s+you\s+tell\s+me\s+where)\s+(are\s+you|you\s+are)\b/,  // Orientation (place)
+      /\b(what|do\s+you\s+know)\s+(day|year|month|time|date)\b/,  // Orientation (time)
+      /\bwe'?re\s+(here\s+to|going\s+to)\s+(help|take\s+care)/,  // Reassurance
+      /\bdon'?t\s+worry\b/,  // Reassurance
+      /\bon\s+a\s+scale\s+of\b/,  // Pain scale
+      /\b(where|show\s+me\s+where)\s+(does\s+it\s+hurt|is\s+the\s+pain)\b/,  // Pain location
+      /\b(can\s+you|please)\s+(open|close|lift|raise|squeeze|move|show)\s+(your|me|my)\b/,  // Patient requests (neuro checks, cooperation)
+      /\b(open|squeeze|lift|raise)\s+(your|my)\s+(mouth|hand|eyes|arm|leg)\b/,  // Direct patient requests
+    ];
+    
+    return strongConversationPatterns.some(pattern => pattern.test(normalized));
+  }
+  
+  /**
+   * Use AI to classify intent for ambiguous messages
+   */
+  async classifyIntentWithAI(userMessage) {
+    // Check cache first
+    const cacheKey = userMessage.toLowerCase().trim();
+    if (this.intentCache.has(cacheKey)) {
+      console.log('🔍 Using cached intent classification');
+      return this.intentCache.get(cacheKey);
+    }
+    
+    try {
+      console.log('🤖 Using AI to classify intent (ambiguous case)');
+      
+      const systemPrompt = `You are a classifier for an EMT training system. Classify the user's message as either:
+- "CONVERSATION" if it's speaking to the patient, asking questions, providing reassurance, or requesting information from the patient
+- "ACTION" if it's performing a medical procedure, examination, or intervention
+
+Respond with ONLY one word: either "CONVERSATION" or "ACTION".`;
+
+      const userPrompt = `Classify this EMT message: "${userMessage}"`;
+      
+      const messages = [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ];
+      
+      const response = await this.callOpenAI(messages, { model: 'gpt-4o-mini' });
+      const classification = response.trim().toUpperCase();
+      
+      const isConversation = classification === 'CONVERSATION';
+      
+      // Cache the result
+      this.intentCache.set(cacheKey, isConversation);
+      
+      // Manage cache size
+      if (this.intentCache.size > this.maxCacheSize) {
+        const firstKey = this.intentCache.keys().next().value;
+        this.intentCache.delete(firstKey);
+      }
+      
+      console.log('🤖 AI classification:', classification);
+      return isConversation;
+      
+    } catch (error) {
+      console.error('❌ AI classification failed, defaulting to conversation:', error);
+      // On error, default to conversation to avoid breaking the flow
+      return true;
+    }
+  }
+
+  /**
+   * Detect if user message is patient conversation rather than medical action
+   * Uses hybrid approach: simple heuristics first, AI fallback for ambiguous cases
+   */
+  async isPatientConversation(userMessage) {
+    const message = userMessage.toLowerCase().trim();
+    
+    console.log('🔍 HYBRID: Checking if patient conversation:', { message });
+    
+    // STEP 1: Check for intent/future tense statements first
+    // These should always be treated as conversation (no action performed yet)
     const intentPatterns = [
       /\bi'?m\s+(?:going\s+to|gonna)\s+/,
       /\bi\s+will\s+/,
@@ -1924,25 +2153,50 @@ Format as JSON with keys: assessment, strengths, improvements, recommendations, 
     ];
     
     const isIntent = intentPatterns.some(pattern => pattern.test(message));
-    
-    // If it's an intent statement, treat it as conversation only (no action performed yet)
     if (isIntent) {
-      hasActionWords = false;
+      console.log('🔍 HYBRID: Intent statement detected - treating as conversation', { message });
+      return {
+        isConversation: true,
+        hasActionWords: false,
+        isPureConversation: true,
+        isIntent: true
+      };
     }
     
-    console.log('🔍 Action words check:', { hasActionWords, isIntent, message });
+    // STEP 2: Check for obvious actions (high confidence)
+    const hasObviousAction = this.hasObviousAction(message);
+    if (hasObviousAction) {
+      console.log('🔍 HYBRID: Obvious action detected - not conversation');
+      return {
+        isConversation: false,
+        hasActionWords: true,
+        isPureConversation: false,
+        isIntent: false
+      };
+    }
     
-    // Return an object with both conversation and action indicators
-    // This allows handling of hybrid messages (e.g., "Linda, can you open your mouth? I want to check your airway")
-    const result = {
-      isConversation: isConversation,
-      hasActionWords: hasActionWords,
-      isPureConversation: isConversation && !hasActionWords,
-      isIntent: isIntent
+    // STEP 3: Check for obvious conversation (high confidence)
+    const hasObviousConv = this.hasObviousConversation(message);
+    if (hasObviousConv) {
+      console.log('🔍 HYBRID: Obvious conversation detected');
+      return {
+        isConversation: true,
+        hasActionWords: false,
+        isPureConversation: true,
+        isIntent: false
+      };
+    }
+    
+    // STEP 4: Ambiguous case - use AI to classify
+    console.log('🔍 HYBRID: Ambiguous message - using AI classifier');
+    const isConversationAI = await this.classifyIntentWithAI(userMessage);
+    
+    return {
+      isConversation: isConversationAI,
+      hasActionWords: !isConversationAI,
+      isPureConversation: isConversationAI,
+      isIntent: false
     };
-    console.log('🔍 Final conversation result:', { result });
-    
-    return result;
   }
 
   /**
@@ -2078,21 +2332,6 @@ Do NOT mention specific symptoms or complaints. Only describe what is visually o
       message += '\n';
     }
     
-    // Handover Analysis (if applicable)
-    if (endingCheck.reason === 'handover') {
-      const handoverContent = this.scenarioEndingManager.extractHandoverContent(endingCheck.userMessage || '');
-      if (handoverContent) {
-        const handoverAnalysis = this.scenarioEndingManager.analyzeHandoverQuality(handoverContent);
-        const handoverFeedback = this.scenarioEndingManager.generateHandoverFeedback(handoverAnalysis, handoverContent);
-        
-        message += '**📋 Handover Report Analysis:**\n';
-        handoverFeedback.forEach(feedback => {
-          message += `- ${feedback}\n`;
-        });
-        message += '\n';
-      }
-    }
-    
     // Ending note
     message += `*Scenario ended due to: ${this.getEndingReasonText(endingCheck.reason)}*`;
     
@@ -2223,18 +2462,34 @@ Do NOT mention specific symptoms or complaints. Only describe what is visually o
     return `session_${conversation.length}_${Date.now()}`;
   }
 
+  // Strip narrative text from intent/future-tense statements
+  // Keep only the patient's quoted dialogue
+  stripNarrativeFromIntent(response) {
+    if (!response || typeof response !== 'string') return response;
+    
+    // Find the first quoted dialogue (patient speech)
+    const quoteMatch = response.match(/"[^"]+"/);
+    if (!quoteMatch) {
+      // No quote found, return as is
+      return response;
+    }
+    
+    const patientQuote = quoteMatch[0];
+    
+    // Return just the quote plus "Awaiting your next step."
+    return `${patientQuote}\n\nAwaiting your next step.`;
+  }
+
   // Detect equipment placement that should provide automatic readings
   detectEquipmentPlacement(userMessage) {
     const normalized = TextNormalizer.normalizeToAsciiLower(userMessage);
     
     // Pulse oximeter placement patterns
     const pulseOxPatterns = [
-      /place\s+(?:a\s+)?(?:pulse\s+)?(?:ox|oximeter)/,
-      /put\s+(?:a\s+)?(?:pulse\s+)?(?:ox|oximeter)\s+on/,
-      /apply\s+(?:a\s+)?(?:pulse\s+)?(?:ox|oximeter)/,
-      /attach\s+(?:a\s+)?(?:pulse\s+)?(?:ox|oximeter)/,
-      /place\s+(?:this|the)\s+(?:pulse\s+)?(?:ox|oximeter)/,
-      /put\s+(?:this|the)\s+(?:pulse\s+)?(?:ox|oximeter)/
+      /place\s+(?:(?:a|an|the)\s+)?(?:pulse\s+)?(?:ox|oximeter)/,
+      /put\s+(?:(?:a|an|the)\s+)?(?:pulse\s+)?(?:ox|oximeter)\s+on/,
+      /apply\s+(?:(?:a|an|the)\s+)?(?:pulse\s+)?(?:ox|oximeter)/,
+      /attach\s+(?:(?:a|an|the)\s+)?(?:pulse\s+)?(?:ox|oximeter)/
     ];
     
     // Blood pressure cuff patterns

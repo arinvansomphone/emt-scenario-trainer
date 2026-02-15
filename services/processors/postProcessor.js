@@ -60,7 +60,7 @@ class PostProcessor {
    * @param {number} max
    * @returns {string}
    */
-  static limitSymptoms(text, max = 2) {
+  static limitSymptoms(text, max = 1) {
     if (!text || typeof text !== 'string') return text;
     // Normalize conjunctions to commas, then split
     const normalized = text
@@ -68,10 +68,67 @@ class PostProcessor {
       .replace(/\s*;\s*/g, ', ');
     const parts = normalized.split(',').map(s => s.trim()).filter(Boolean);
     if (parts.length <= max) {
-      return parts.join(', ');
+      const result = parts.join(', ');
+      return this.fixGrammar(result);
     }
     const selected = parts.slice(0, max);
-    return selected.length === 2 ? `${selected[0]} and ${selected[1]}` : selected.join(', ');
+    // Return just the first symptom if max is 1, otherwise join with "and" for 2
+    if (max === 1) {
+      return this.fixGrammar(selected[0]);
+    }
+    return this.fixGrammar(selected.length === 2 ? `${selected[0]} and ${selected[1]}` : selected.join(', '));
+  }
+  
+  /**
+   * Fix grammar for dispatch content (convert adjectives to nouns, etc.)
+   * @param {string} text - Text to fix
+   * @returns {string} - Grammatically correct text
+   */
+  static fixGrammar(text) {
+    if (!text || typeof text !== 'string') return text;
+    
+    const lowerText = text.toLowerCase().trim();
+    
+    // Grammar fixes: adjective -> noun or better phrase
+    const grammarFixes = {
+      'confused': 'confusion',
+      'dizzy': 'dizziness',
+      'weak': 'weakness',
+      'nauseous': 'nausea',
+      'unconscious': 'unresponsiveness',
+      'unresponsive': 'unresponsiveness',
+      'short of breath': 'shortness of breath',
+      'difficulty breathing': 'difficulty breathing',
+      'trouble breathing': 'difficulty breathing',
+      'altered mental status': 'altered mental status',
+      'disoriented': 'disorientation',
+      'lethargic': 'lethargy',
+      'bleeding': 'bleeding',
+      'vomiting': 'vomiting',
+      'seizing': 'seizure',
+      'having a seizure': 'seizure',
+      'chest pain': 'chest pain',
+      'abdominal pain': 'abdominal pain',
+      'difficulty speaking': 'difficulty speaking',
+      'slurred speech': 'slurred speech',
+      'one-sided weakness': 'one-sided weakness',
+      'fell': 'fall',
+      'injured': 'injury'
+    };
+    
+    // Check for exact matches first
+    if (grammarFixes[lowerText]) {
+      return grammarFixes[lowerText];
+    }
+    
+    // Check for partial matches
+    for (const [key, value] of Object.entries(grammarFixes)) {
+      if (lowerText.includes(key)) {
+        return lowerText.replace(key, value);
+      }
+    }
+    
+    return text;
   }
   /**
    * Content filtering for inappropriate content
@@ -390,6 +447,65 @@ class PostProcessor {
   }
 
   /**
+   * Type-specific dispatch content: if AI returns generic content, we override so the
+   * dispatch matches the selected scenario type. (Metabolic and Abdominal are not
+   * enforced here—symptom-based variety is acceptable.)
+   */
+  static SCENARIO_TYPE_DISPATCH_DEFAULTS = {
+    'neurologic scenario': {
+      keywords: ['stroke', 'neurologic', 'neurological', 'confus', 'weakness', 'facial', 'slurr', 'headache', 'speech', 'numb', 'vision', 'seizure'],
+      defaultContent: 'sudden weakness on one side, possible stroke'
+    },
+    'environmental scenario': {
+      keywords: ['heat', 'cold', 'hypothermia', 'hyperthermia', 'exposure', 'environmental', 'dehydration', 'overheat', 'frostbite', 'bee sting', 'allergic'],
+      defaultContent: 'heat exhaustion, person dizzy and weak'
+    },
+    'ob/gyn scenario': {
+      keywords: ['pregnant', 'labor', 'delivery', 'obstetric', 'baby', 'contraction', 'birth', 'pregnancy', 'bleeding'],
+      defaultContent: 'pregnant woman with contractions'
+    },
+    'mvc scenario': {
+      keywords: ['car', 'accident', 'mvc', 'vehicle', 'collision', 'motor vehicle', 'crash', 'wreck'],
+      defaultContent: 'car accident, driver injured'
+    },
+    'fall scenario': {
+      keywords: ['fall', 'fell', 'fallen', 'tripped', 'ladder', 'height', 'stairs', 'roof'],
+      defaultContent: 'person fell, possible injury'
+    },
+    'assault scenario': {
+      keywords: ['assault', 'hit', 'attacked', 'struck', 'beaten', 'attack', 'beating'],
+      defaultContent: 'assault, person injured'
+    },
+    'stabbing scenario': {
+      keywords: ['stab', 'stabbing', 'knife', 'cut', 'puncture'],
+      defaultContent: 'stabbing, person injured'
+    },
+    'gsw scenario': {
+      keywords: ['gunshot', 'gsw', 'shot', 'bullet', 'gun', 'shooting'],
+      defaultContent: 'gunshot wound, person shot'
+    },
+    'burn scenario': {
+      keywords: ['burn', 'burned', 'fire', 'scald', 'flame', 'hot'],
+      defaultContent: 'burns from fire'
+    }
+  };
+
+  /**
+   * Ensure dispatch content matches the selected scenario type; if not, use type-specific default.
+   */
+  static ensureContentMatchesScenarioType(content, subScenario) {
+    if (!content || !subScenario) return content;
+    const key = String(subScenario).toLowerCase().trim();
+    const def = this.SCENARIO_TYPE_DISPATCH_DEFAULTS[key];
+    if (!def) return content;
+    const contentLower = String(content).toLowerCase();
+    const hasKeyword = def.keywords.some(kw => contentLower.includes(kw.toLowerCase()));
+    if (hasKeyword) return content;
+    console.log(`📌 Overriding generic dispatch content for "${subScenario}" with type-appropriate default`);
+    return def.defaultContent;
+  }
+
+  /**
    * Generate compliant dispatch message according to requirements
    * @param {string} rawContent - Raw AI content
    * @param {Object} scenarioData - Scenario data (optional)
@@ -408,14 +524,15 @@ class PostProcessor {
         const gender = dispatchInfo.gender || 'male';
         const location = dispatchInfo.location || '1425 El Camino Real';
         const time = (dispatchInfo.time || '2:30 PM').toLowerCase().replace(/\s*/g, '');
-        // Determine content: mechanism for trauma, symptoms for medical
-        const mainScenario = (scenarioData?.mainScenario || '').toLowerCase();
+      // Determine content: mechanism for trauma, symptoms for medical
+      const mainScenario = (scenarioData?.mainScenario || '').toLowerCase();
         const subScenario = (scenarioData?.subScenario || '').toLowerCase();
-        const isTrauma = /mvc|fall|assault|stabbing|gsw|burn|trauma/.test(subScenario) || /trauma/.test(mainScenario);
+        const isTrauma = /mvc|fall|assault|sport injury|stabbing|gsw|burn|trauma/.test(subScenario) || /trauma/.test(mainScenario);
         let content = isTrauma ? (dispatchInfo.mechanism || dispatchInfo.symptoms || 'injury with pain') : (dispatchInfo.symptoms || dispatchInfo.mechanism || 'medical symptoms');
-        if (!isTrauma) {
-          content = this.limitSymptoms(content, 2);
-        }
+        // Limit to just one main piece of information for dispatch realism
+        content = this.limitSymptoms(content, 1);
+        // Override if content doesn't match selected scenario type (so dispatch is always type-appropriate)
+        content = this.ensureContentMatchesScenarioType(content, scenarioData?.subScenario);
         const callerInfo = dispatchInfo.callerInfo || 'bystander on scene';
         
         // Build dispatch message (canonical format, no extra lines)
@@ -454,6 +571,9 @@ class PostProcessor {
         const randomTypes = ['cardiac', 'respiratory', 'trauma', 'neurological', 'metabolic'];
         scenarioType = randomTypes[Math.abs(seed) % randomTypes.length];
       }
+      // Trauma sub-scenarios (MVC, Fall, etc.) don't contain "trauma"; treat them as trauma
+      const mainScenario = (scenarioData?.mainScenario || '').toLowerCase();
+      const isTraumaScenario = /trauma/.test(mainScenario) || /mvc|fall|assault|sport injury|stabbing|gsw|burn/.test(scenarioType);
       
       console.log('🎭 Using scenario type for dispatch:', scenarioType);
       console.log('📊 Scenario data received:', JSON.stringify(scenarioData, null, 2));
@@ -537,7 +657,7 @@ class PostProcessor {
           'difficulty breathing with blue lips'
         ];
         content = respiratoryConditions[(validSeed + 4) % respiratoryConditions.length];
-      } else if (scenarioType.includes('trauma')) {
+      } else if (isTraumaScenario) {
         // Check for specific trauma subtypes
         if (scenarioType.includes('mvc') || scenarioType.includes('motor vehicle') || scenarioType.includes('car accident')) {
           const mvcConditions = [
@@ -568,6 +688,34 @@ class PostProcessor {
             'attack, multiple injuries'
           ];
           content = assaultConditions[(validSeed + 4) % assaultConditions.length];
+        } else if (scenarioType.includes('stabbing')) {
+          const stabbingConditions = [
+            'stabbing, person injured',
+            'knife wound, bleeding',
+            'stabbing victim, multiple wounds'
+          ];
+          content = stabbingConditions[(validSeed + 4) % stabbingConditions.length];
+        } else if (scenarioType.includes('gsw')) {
+          const gswConditions = [
+            'gunshot wound, person shot',
+            'shooting victim, critical',
+            'gunshot, person injured'
+          ];
+          content = gswConditions[(validSeed + 4) % gswConditions.length];
+        } else if (scenarioType.includes('burn')) {
+          const burnConditions = [
+            'burns from fire',
+            'person burned in kitchen fire',
+            'chemical burn, hand injured'
+          ];
+          content = burnConditions[(validSeed + 4) % burnConditions.length];
+        } else if (scenarioType.includes('sport')) {
+          const sportConditions = [
+            'football injury, shoulder hurt',
+            'bicycle crash, head injury',
+            'sports injury, leg pain'
+          ];
+          content = sportConditions[(validSeed + 4) % sportConditions.length];
         } else {
           // General trauma conditions
           const traumaConditions = [
@@ -603,6 +751,28 @@ class PostProcessor {
           'weakness with rapid breathing'
         ];
         content = metabolicConditions[(validSeed + 4) % metabolicConditions.length];
+      } else if (scenarioType.includes('environmental')) {
+        const environmentalConditions = [
+          'heat exhaustion, person dizzy and weak',
+          'possible hypothermia, person cold and confused',
+          'dehydration from heat exposure',
+          'overheated after working outside'
+        ];
+        content = environmentalConditions[(validSeed + 4) % environmentalConditions.length];
+      } else if (scenarioType.includes('abdominal')) {
+        const abdominalConditions = [
+          'severe abdominal pain',
+          'stomach pain and nausea',
+          'abdominal pain with vomiting'
+        ];
+        content = abdominalConditions[(validSeed + 4) % abdominalConditions.length];
+      } else if (scenarioType.includes('ob') || scenarioType.includes('gyn')) {
+        const obgynConditions = [
+          'pregnant woman with contractions',
+          'labor, baby coming',
+          'pregnancy complications, bleeding'
+        ];
+        content = obgynConditions[(validSeed + 4) % obgynConditions.length];
       } else {
         // Mix of all condition types for variety
         const allConditions = [
@@ -622,10 +792,10 @@ class PostProcessor {
       
       // Generate bystander info
       const bystanderInfo = this.generateBystanderInfo(location, validSeed + 5);
-      // For medical scenarios (non-trauma), limit symptoms list to max two
-      if (!scenarioType.includes('trauma')) {
-        content = this.limitSymptoms(content, 2);
-      }
+      // Limit to just one main piece of information for dispatch realism
+      content = this.limitSymptoms(content, 1);
+      // Ensure content matches selected scenario type (overrides if we fell into generic branch)
+      content = this.ensureContentMatchesScenarioType(content, scenarioData?.subScenario);
       
       // Build the compliant dispatch message (canonical format)
       console.log('🔧 Building dispatch with:', { age, gender, location, time, content });

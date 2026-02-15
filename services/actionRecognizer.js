@@ -28,7 +28,17 @@ class ActionRecognizer {
         monitor: ['monitor', 'cardiac monitor', 'pulse oximeter', 'bp cuff', 'blood pressure cuff'],
         airway: ['airway', 'opa', 'npa', 'oral airway', 'nasal airway', 'suction'],
         immobilization: ['c-collar', 'cervical collar', 'backboard', 'spine board', 'splint', 'immobilize'],
-        iv: ['iv', 'intravenous', 'saline', 'normal saline', 'fluid', 'line']
+        iv: ['iv', 'intravenous', 'saline', 'normal saline', 'fluid', 'line'],
+        supportiveCare: ['emesis bag', 'vomit bag', 'barf bag', 'sick bag', 'blanket', 'pillow', 'water', 'towel', 'tissue']
+      },
+      
+      // Scene safety / PPE
+      ppe: {
+        gloves: ['gloves', 'glove'],
+        mask: ['mask', 'face mask', 'surgical mask', 'n95'],
+        gown: ['gown', 'protective gown'],
+        eyeProtection: ['goggles', 'eye protection', 'face shield', 'shield'],
+        ppe: ['ppe', 'personal protective equipment', 'protective equipment']
       },
       
       // Medications
@@ -131,6 +141,36 @@ class ActionRecognizer {
           /transport\s+to\s+(hospital|ed|er)/i
         ],
         priority: 1
+      },
+      
+      sceneSafety: {
+        patterns: [
+          /(put\s+on|don|wear|apply)\s+(my\s+)?(ppe|gloves?|mask|gown|goggles|eye\s+protection|face\s+shield)/i,
+          /(put\s+on|don|wear)\s+(my\s+)?(gloves?\s+(and|&)\s+mask)/i,
+          /(assess|check|ensure)\s+(scene\s+)?safety/i,
+          /scene\s+is\s+(safe|secure)/i,
+          /bsi\s+(precautions?|taken)/i
+        ],
+        priority: 1
+      },
+      
+      supportiveCare: {
+        patterns: [
+          /(give|offer|provide|hand)\s+(her|him|them|the\s+patient)?\s*(an?\s+)?(emesis\s+bag|vomit\s+bag|barf\s+bag|sick\s+bag)/i,
+          /(give|offer|provide|hand)\s+(her|him|them|the\s+patient)?\s*(an?\s+)?(blanket|pillow|water|towel|tissue)/i,
+          /(place|put)\s+(an?\s+)?(emesis\s+bag|vomit\s+bag|barf\s+bag)\s+(nearby|next\s+to|beside)/i,
+          /get\s+(her|him|them|the\s+patient)?\s*(an?\s+)?(emesis\s+bag|vomit\s+bag|blanket|water)/i
+        ],
+        priority: 2
+      },
+
+      oxygenAdmin: {
+        patterns: [
+          /(give|administer|apply|start|place)\s+(.*?)?\s*(oxygen|o2)\s+(at|@)?\s*(\d+)\s*(l|lpm|liters?)/i,
+          /(give|administer|apply|start|place)\s+(.*?)?\s*(nasal\s+cannula|non[- ]?rebreather|nrb|bvm|bag\s+valve\s+mask|simple\s+mask)/i,
+          /(oxygen|o2)\s+(at|@)\s*(\d+)\s*(l|lpm|liters?)\s+(via|through|with)\s+(nasal\s+cannula|non[- ]?rebreather|nrb|mask)/i
+        ],
+        priority: 0
       }
     };
   }
@@ -210,6 +250,21 @@ class ActionRecognizer {
         details.priority = this.extractTransportPriority(normalized);
         details.destination = this.extractDestination(normalized);
         details.reason = this.extractTransportReason(normalized);
+        break;
+        
+      case 'sceneSafety':
+        details.ppeItems = this.identifyPPE(normalized);
+        details.safetyAction = this.identifySceneSafetyAction(normalized);
+        break;
+        
+      case 'supportiveCare':
+        details.careItem = this.identifySupportiveCareItem(normalized);
+        details.careAction = this.identifySupportiveCareAction(normalized);
+        break;
+
+      case 'oxygenAdmin':
+        details.flowRate = this.extractOxygenFlowRate(normalized);
+        details.deliveryMethod = this.extractOxygenDeliveryMethod(normalized);
         break;
     }
 
@@ -369,6 +424,89 @@ class ActionRecognizer {
   }
 
   /**
+   * Identify PPE items from message
+   * @param {string} normalized - Normalized message
+   * @returns {Array} - List of PPE items
+   */
+  identifyPPE(normalized) {
+    const ppeItems = [];
+    
+    for (const [ppeType, terms] of Object.entries(this.medicalTerms.ppe)) {
+      if (terms.some(term => normalized.includes(term))) {
+        ppeItems.push(ppeType);
+      }
+    }
+    
+    return ppeItems.length > 0 ? ppeItems : ['general'];
+  }
+
+  /**
+   * Identify scene safety action from message
+   * @param {string} normalized - Normalized message
+   * @returns {string} - Scene safety action type
+   */
+  identifySceneSafetyAction(normalized) {
+    if (/(put\s+on|don|wear|apply)/.test(normalized)) return 'donning';
+    if (/(assess|check|ensure)/.test(normalized)) return 'assessment';
+    if (/(scene\s+is|bsi)/.test(normalized)) return 'confirmation';
+    return 'general';
+  }
+
+  /**
+   * Identify supportive care item from message
+   * @param {string} normalized - Normalized message
+   * @returns {string} - Supportive care item
+   */
+  identifySupportiveCareItem(normalized) {
+    if (/(emesis\s+bag|vomit\s+bag|barf\s+bag|sick\s+bag)/.test(normalized)) return 'emesis bag';
+    if (/blanket/.test(normalized)) return 'blanket';
+    if (/pillow/.test(normalized)) return 'pillow';
+    if (/water/.test(normalized)) return 'water';
+    if (/towel/.test(normalized)) return 'towel';
+    if (/tissue/.test(normalized)) return 'tissue';
+    return 'supportive care item';
+  }
+
+  /**
+   * Identify supportive care action from message
+   * @param {string} normalized - Normalized message
+   * @returns {string} - Supportive care action type
+   */
+  identifySupportiveCareAction(normalized) {
+    if (/(give|offer|provide|hand)/.test(normalized)) return 'providing';
+    if (/(place|put)/.test(normalized)) return 'placing';
+    if (/get/.test(normalized)) return 'getting';
+    return 'providing';
+  }
+
+  /**
+   * Extract oxygen flow rate from message
+   * @param {string} normalized - Normalized message
+   * @returns {string} - Flow rate (e.g., "6 LPM")
+   */
+  extractOxygenFlowRate(normalized) {
+    const match = normalized.match(/(\d+)\s*(l|lpm|liters?)/i);
+    if (match) {
+      return `${match[1]} LPM`;
+    }
+    return 'unspecified flow rate';
+  }
+
+  /**
+   * Extract oxygen delivery method from message
+   * @param {string} normalized - Normalized message
+   * @returns {string} - Delivery method
+   */
+  extractOxygenDeliveryMethod(normalized) {
+    if (/nasal\s+cannula|nc\b/.test(normalized)) return 'nasal cannula';
+    if (/non[- ]?rebreather|nrb/.test(normalized)) return 'non-rebreather mask';
+    if (/simple\s+mask/.test(normalized)) return 'simple face mask';
+    if (/bvm|bag\s+valve\s+mask/.test(normalized)) return 'BVM';
+    if (/mask/.test(normalized)) return 'oxygen mask';
+    return 'oxygen';
+  }
+
+  /**
    * Recognize general medical actions when specific patterns don't match
    * @param {string} normalized - Normalized message
    * @param {string} original - Original message
@@ -477,8 +615,8 @@ class ActionRecognizer {
    */
   validateMedicationAdmin(actionDetails, patientProfile) {
     const medication = actionDetails.medication;
-    const allergies = patientProfile?.allergies || [];
-    const medicalHistory = patientProfile?.medicalHistory || [];
+    const allergies = Array.isArray(patientProfile?.allergies) ? patientProfile.allergies : [];
+    const medicalHistory = Array.isArray(patientProfile?.medicalHistory) ? patientProfile.medicalHistory : [];
 
     // Check allergies
     const allergyConflict = allergies.find(allergy => 

@@ -460,7 +460,8 @@ class PatientSimulator {
     }
     
     if (/(medication|pills|drugs)/.test(normalizedQuestion)) {
-      const meds = patientProfile?.medications || ['none'];
+      const rawMeds = patientProfile?.medications;
+      const meds = Array.isArray(rawMeds) ? rawMeds : (rawMeds != null ? [String(rawMeds)] : ['none']);
       if (meds.length === 1 && meds[0] === 'none') {
         return 'I don\'t take any medications.';
       }
@@ -468,7 +469,8 @@ class PatientSimulator {
     }
     
     if (/(allerg)/.test(normalizedQuestion)) {
-      const allergies = patientProfile?.allergies || ['none'];
+      const rawAllergies = patientProfile?.allergies;
+      const allergies = Array.isArray(rawAllergies) ? rawAllergies : (rawAllergies != null ? [String(rawAllergies)] : ['none']);
       if (allergies.length === 1 && allergies[0] === 'none') {
         return 'I don\'t have any known allergies.';
       }
@@ -476,7 +478,8 @@ class PatientSimulator {
     }
     
     if (/(history|medical|condition)/.test(normalizedQuestion)) {
-      const history = patientProfile?.medicalHistory || ['none'];
+      const rawHistory = patientProfile?.medicalHistory;
+      const history = Array.isArray(rawHistory) ? rawHistory : (rawHistory != null ? [String(rawHistory)] : ['none']);
       if (history.length === 1 && history[0] === 'none') {
         return 'I don\'t have any significant medical history.';
       }

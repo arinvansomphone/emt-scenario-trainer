@@ -39,9 +39,12 @@ export default function Header({ timeLeft, isTimerRunning }) {
             fontWeight: 800,
             fontFamily: "'Inter', sans-serif",
             color: '#000000',
-            cursor: 'pointer'
+            cursor: 'pointer',
+            transition: 'color 0.2s ease'
           }}
           onClick={handleTitleClick}
+          onMouseEnter={(e) => e.target.style.color = '#3498db'}
+          onMouseLeave={(e) => e.target.style.color = '#000000'}
         >
           EMED Scenario Trainer
         </span>

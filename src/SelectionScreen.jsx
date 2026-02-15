@@ -98,7 +98,7 @@ export default function SelectionScreen() {
   };
 
   return (
-    <div style={{ height: '100vh', background: '#1e3a8a', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ height: '100vh', background: '#3b82f6', display: 'flex', flexDirection: 'column' }}>
       <Header />
       <div style={{ 
         flex: 1,
@@ -135,13 +135,13 @@ export default function SelectionScreen() {
                 fontSize: '0.875rem',
                 fontWeight: '500'
               }}>
-                Type your SUNet ID
+                Enter your name
               </label>
               <input
                 type="text"
                 value={sunetId}
                 onChange={(e) => setSunetId(e.target.value)}
-                placeholder="SUNet ID"
+                placeholder=""
                 style={{
                   width: '100%',
                   padding: '0.5rem 0.75rem',

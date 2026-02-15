@@ -53,6 +53,8 @@ export default function App() {
   const [micLevel, setMicLevel] = useState(0);
   const inputRef = useRef(null);
   const [backendConnected, setBackendConnected] = useState(true); // Track backend connection
+  const [sessionId, setSessionId] = useState(null); // Track session ID for state management
+  const [isEndingScenario, setIsEndingScenario] = useState(false); // Track end scenario loading state
 
   const scrollToBottom = () => {
     if (messagesEndRef.current) {
@@ -91,6 +93,63 @@ export default function App() {
     // Convert newline to <br/> 
     result = result.replace(/\n/g, '<br/>');
     return result;
+  };
+
+  // Handle ending the scenario and getting feedback
+  const handleEndScenario = async () => {
+    if (!scenarioData || conversation.length === 0) {
+      alert('Please have a conversation with the patient first.');
+      return;
+    }
+
+    setIsEndingScenario(true);
+
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/score`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          conversation: conversation,
+          scenarioData: scenarioData,
+          sessionId: sessionId,
+          timeElapsed: 20 * 60 - timeLeft
+        }),
+      });
+
+      const text = await response.text();
+      if (!response.ok) {
+        throw new Error(text || `Server error ${response.status}`);
+      }
+      const data = JSON.parse(text || '{}');
+
+      if (data.success) {
+        // Navigate to feedback page with the score data and rubric breakdown
+        navigate('/feedback', {
+          state: {
+            feedback: data.data.feedback,
+            score: data.data.score,
+            timeElapsed: 20 * 60 - timeLeft,
+            rubricBreakdown: data.data.rubricBreakdown || null,
+            rubricTotalScore: data.data.rubricTotalScore,
+            rubricMaxScore: data.data.rubricMaxScore,
+            rubricPass: data.data.rubricPass,
+            scenarioInfo: {
+              mainScenario: scenarioData?.mainScenario || 'Unknown',
+              subScenario: scenarioData?.subScenario || 'Unknown'
+            }
+          }
+        });
+      } else {
+        throw new Error(data.error || 'Failed to get feedback');
+      }
+    } catch (error) {
+      console.error('Error ending scenario:', error);
+      alert('Failed to generate feedback. Please try again.');
+    } finally {
+      setIsEndingScenario(false);
+    }
   };
 
   // Generate dispatch note function is no longer used but kept for reference
@@ -163,13 +222,20 @@ export default function App() {
         body: JSON.stringify({
           message: message,
           conversation: conversation,
-          scenarioData: scenarioData // Include scenario data
+          scenarioData: scenarioData, // Include scenario data
+          sessionId: sessionId // Include session ID for state management
         }),
       });
 
       const data = await response.json();
 
       if (data.success) {
+        // Store session ID from response (for new sessions)
+        if (data.data.sessionId && !sessionId) {
+          console.log('📦 Session ID received:', data.data.sessionId);
+          setSessionId(data.data.sessionId);
+        }
+
         // Update scenario data if enhanced data is returned
         if (data.data.scenarioData && data.data.scenarioData.generatedScenario) {
           setScenarioData(data.data.scenarioData);
@@ -407,7 +473,7 @@ export default function App() {
     return (
       <div style={{
         minHeight: '100vh',
-        background: '#1e3a8a',
+        background: '#3b82f6',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
@@ -474,7 +540,7 @@ export default function App() {
   return (
     <div style={{
       minHeight: '100vh',
-      background: '#1e3a8a',
+      background: '#3b82f6',
       display: 'flex',
       flexDirection: 'column'
     }}>
@@ -511,7 +577,7 @@ export default function App() {
                 maxWidth: 'min(680px, 85%)',
                 width: 'fit-content',
                 margin: 0,
-                backgroundColor: msg.sender === 'user' ? '#E60000' : 'white',
+                backgroundColor: msg.sender === 'user' ? '#9ca3af' : 'white',
                 color: msg.sender === 'user' ? 'white' : '#000000',
                 borderRadius: msg.sender === 'user' ? '1.5rem 1.5rem 0.5rem 1.5rem' : '1.5rem 1.5rem 1.5rem 0.5rem',
                 padding: '1rem',
@@ -590,39 +656,43 @@ export default function App() {
         padding: '1.5rem',
         display: 'flex',
         justifyContent: 'center',
-        background: '#1e3a8a',
-        zIndex: 1000
+        alignItems: 'center',
+        background: '#3b82f6',
+        zIndex: 1000,
+        gap: '1rem'
       }}>
         <div style={{
           position: 'relative',
           width: '100%',
-          maxWidth: '600px',
+          maxWidth: '1000px',
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'center'
+          justifyContent: 'center',
+          gap: '1rem'
         }}>
           <div style={{
-            width: '100%',
-            maxWidth: '600px',
+            flex: 1,
             backgroundColor: 'white',
             borderRadius: '25px',
             padding: '10px 14px',
             display: 'flex',
             alignItems: 'center',
-            boxShadow: '0 2px 10px rgba(0, 0, 0, 0.1)'
+            boxShadow: '0 2px 10px rgba(0, 0, 0, 0.1)',
+            opacity: isEndingScenario ? 0.5 : 1,
+            pointerEvents: isEndingScenario ? 'none' : 'auto'
           }}>
             <textarea
               ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey && !isLoading) {
+                if (e.key === 'Enter' && !e.shiftKey && !isLoading && !isEndingScenario) {
                   e.preventDefault();
                   handleSend();
                 }
               }}
               placeholder={isLoading ? "Please wait..." : "Say/type your response"}
-              disabled={isLoading}
+              disabled={isLoading || isEndingScenario}
               rows={1}
               style={{
                 flex: 1,
@@ -643,7 +713,7 @@ export default function App() {
             {/* Voice input button */}
             <button
               onClick={isListening ? stopListening : startListening}
-              disabled={isLoading}
+              disabled={isLoading || isEndingScenario}
               style={{
                 background: isListening ? '#ffebee' : 'none',
                 border: 'none',
@@ -679,7 +749,7 @@ export default function App() {
             {/* Removed waveform and confirm/cancel controls */}
             <button
               onClick={handleSend}
-              disabled={isLoading || !input.trim()}
+              disabled={isLoading || !input.trim() || isEndingScenario}
               style={{
                 background: 'none',
                 border: 'none',
@@ -709,6 +779,45 @@ export default function App() {
               </svg>
             </button>
           </div>
+
+          {/* End Scenario Button - aligned with input bubble */}
+          {scenarioData && conversation.length > 0 && !isEndingScenario && (
+            <button
+              onClick={handleEndScenario}
+              disabled={isEndingScenario || isLoading}
+              style={{
+                backgroundColor: '#10b981',
+                color: 'white',
+                padding: '0.75rem 1.5rem',
+                borderRadius: '12px',
+                border: 'none',
+                fontSize: '0.9rem',
+                fontWeight: '600',
+                cursor: isEndingScenario || isLoading ? 'not-allowed' : 'pointer',
+                boxShadow: '0 4px 12px rgba(16, 185, 129, 0.4)',
+                transition: 'all 0.2s ease',
+                opacity: isEndingScenario || isLoading ? 0.6 : 1,
+                whiteSpace: 'nowrap',
+                flexShrink: 0
+              }}
+              onMouseEnter={(e) => {
+                if (!isEndingScenario && !isLoading) {
+                  e.target.style.backgroundColor = '#059669';
+                  e.target.style.transform = 'translateY(-2px)';
+                  e.target.style.boxShadow = '0 6px 16px rgba(16, 185, 129, 0.5)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!isEndingScenario && !isLoading) {
+                  e.target.style.backgroundColor = '#10b981';
+                  e.target.style.transform = 'translateY(0)';
+                  e.target.style.boxShadow = '0 4px 12px rgba(16, 185, 129, 0.4)';
+                }
+              }}
+            >
+              {isEndingScenario ? 'Generating...' : 'End Scenario'}
+            </button>
+          )}
         </div>
       </div>
 

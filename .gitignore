@@ -67,3 +67,11 @@ temp/
 
 # Optional REPL history
 .node_repl_history
+
+# Database Files (contains student data - DO NOT COMMIT)
+database/*.db
+database/*.db-wal
+database/*.db-shm
+database/backups/
+*.sqlite
+*.sqlite3

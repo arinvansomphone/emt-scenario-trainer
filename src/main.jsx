@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.jsx'
 import SelectionScreen from './SelectionScreen.jsx'
+import FeedbackDisplay from './FeedbackDisplay.jsx'
 import { HashRouter, Routes, Route } from 'react-router-dom';
 import About from './About';
 
@@ -14,6 +15,7 @@ createRoot(document.getElementById('root')).render(
         <Route path="/selection" element={<SelectionScreen />} />
         <Route path="/app" element={<App />} />
         <Route path="/about" element={<About />} />
+        <Route path="/feedback" element={<FeedbackDisplay />} />
       </Routes>
     </HashRouter>
   </StrictMode>,

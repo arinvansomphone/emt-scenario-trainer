@@ -15,6 +15,118 @@ try {
 class TemplateGenerator {
   constructor() {
     this.openai = openai;
+    // Track recently used locations and times to ensure variety
+    this.recentLocations = [];
+    this.recentTimes = [];
+    this.maxRecentTracking = 10; // Track last 10 to avoid repeats
+  }
+
+  /**
+   * Get a random location that hasn't been used recently
+   * @returns {string} - A location suggestion
+   */
+  getRandomUnusedLocation() {
+    const allLocations = [
+      'Whole Foods parking lot on Castro Street',
+      'WeWork coworking space on Market Street',
+      'apartment complex on University Avenue',
+      'Target store entrance',
+      'Santa Clara Public Library reading room',
+      'Santana Row shopping district boutique',
+      'Safeway produce section on Homestead Road',
+      'AMC theater lobby at Westfield mall',
+      'Chipotle restaurant downtown',
+      'Valley Fair parking garage level 3',
+      'Stanford Shopping Center courtyard',
+      'soccer field at Memorial Park',
+      'Caltrain station platform',
+      'Costco Wholesale entrance',
+      'YMCA basketball court',
+      'Wells Fargo bank on First Street',
+      'In-N-Out Burger parking lot',
+      'Dave & Busters arcade',
+      'Panera Bread on Stevens Creek Boulevard',
+      'Home Depot garden section',
+      'apartment pool area on Park Avenue',
+      'bowling alley on Bascom Avenue',
+      'tennis courts at Baylands Park',
+      'Trader Joe\'s parking lot',
+      'REI outdoor store',
+      'public park picnic area',
+      'office break room on Tasman Drive',
+      'Apple Store at Valley Fair mall',
+      'Red Lobster restaurant parking lot',
+      'Best Buy electronics store'
+    ];
+    
+    // Filter out recently used locations
+    const availableLocations = allLocations.filter(loc => 
+      !this.recentLocations.some(recent => 
+        loc.toLowerCase().includes(recent.toLowerCase()) || 
+        recent.toLowerCase().includes(loc.toLowerCase())
+      )
+    );
+    
+    // If all locations have been used, reset tracking
+    if (availableLocations.length === 0) {
+      this.recentLocations = [];
+      return allLocations[Math.floor(Math.random() * allLocations.length)];
+    }
+    
+    return availableLocations[Math.floor(Math.random() * availableLocations.length)];
+  }
+
+  /**
+   * Get a random time that hasn't been used recently
+   * @returns {string} - A time in format like '7:23am'
+   */
+  getRandomUnusedTime() {
+    const hours = [];
+    const minutes = [];
+    
+    // Generate varied times
+    for (let h = 7; h <= 11; h++) hours.push(`${h}am`); // Morning
+    for (let h = 12; h <= 11; h++) hours.push(h === 12 ? '12pm' : `${h}pm`); // Afternoon/Evening
+    
+    // Varied minutes - avoid always using :15, :30, :45
+    for (let m = 0; m < 60; m += 5) {
+      minutes.push(m.toString().padStart(2, '0'));
+    }
+    
+    let attempts = 0;
+    let timeStr;
+    
+    // Try to find a time not recently used
+    do {
+      const hour = hours[Math.floor(Math.random() * hours.length)];
+      const minute = minutes[Math.floor(Math.random() * minutes.length)];
+      timeStr = `${hour.replace(/am|pm/, '')}:${minute}${hour.includes('am') ? 'am' : 'pm'}`;
+      attempts++;
+    } while (this.recentTimes.includes(timeStr) && attempts < 20);
+    
+    return timeStr;
+  }
+
+  /**
+   * Track a location as recently used
+   * @param {string} location - Location to track
+   */
+  trackLocation(location) {
+    this.recentLocations.push(location);
+    if (this.recentLocations.length > this.maxRecentTracking) {
+      this.recentLocations.shift(); // Remove oldest
+    }
+  }
+
+  /**
+   * Track a time as recently used
+   * @param {string} time - Time to track
+   */
+  trackTime(time) {
+    this.recentTimes.push(time);
+    if (this.recentTimes.length > this.maxRecentTracking) {
+      this.recentTimes.shift(); // Remove oldest
+    }
   }
 
   /**
@@ -43,7 +155,7 @@ ${mechanismExamples}
 Fill in this template with realistic details:
 
 {
-  "location": "[specific non-medical location where incident occurred - DO NOT use or reference hospitals, ERs, medical centers, clinics, urgent care, dialysis centers, doctor's offices, nursing homes, skilled nursing facilities, rehabilitation facilities, or any medical facilities. Use locations like 'shopping mall food court', 'hiking trail near Pine Ridge Park', 'residential home on Oak Street', 'office building', 'park', 'restaurant', 'gym', 'school', 'warehouse', etc.]",
+  "location": "[MUST be varied and creative - use diverse location types: office buildings, restaurants (NOT coffee shops), parks, fitness centers, retail stores, schools, entertainment venues, transit locations, residential areas, or miscellaneous places like grocery stores, banks, car washes. Be specific with street names. NEVER use: Starbucks, coffee shops, hospitals, clinics, or medical facilities. Example: 'Safeway parking lot on Stevens Creek Boulevard', 'yoga studio in Santana Row', 'AMC theater in Westfield mall']",
   "time": "[time in format like '2:30 PM', '10:45 AM', '4:15 PM' - NOT 'afternoon', 'morning', or '<current time>']",
   "callerInfo": "[who called 911 - choose ONE: 'A coworker called 911 and is present on scene as well.' OR 'A friend called 911 and is present on scene as well.' OR 'A family member called 911 and is present on scene as well.' OR 'A bystander called 911 and is present on scene as well.' OR 'The patient called 911 themselves.']",
   "mechanism": "[what a 911 caller would actually say - use layperson language, NOT medical terminology. Examples: 'car accident, someone hurt' NOT 'MVC with possible injuries', 'chest pain and trouble breathing' NOT 'cardiac event', 'fell down stairs' NOT 'trauma to extremities']"
@@ -76,6 +188,10 @@ Return ONLY the JSON object, no additional text or comments.`;
       ? this.getTraumaMechanismExamples(scenarioType)
       : this.getMedicalMechanismExamples(scenarioType);
     
+    // Get suggested location and time to guide variety
+    const suggestedLocation = this.getRandomUnusedLocation();
+    const suggestedTime = this.getRandomUnusedTime();
+    
     return `Generate complete dispatch information for a ${scenarioType}. 
 
 ${categoryRequirement}
@@ -87,8 +203,8 @@ Fill in this template with realistic details:
 {
   "age": "[patient age - choose appropriate age for scenario type. Cardiac: 45-75, Trauma: 18-50, Respiratory: 25-65, Neurologic: 40-70, Metabolic: 25-60, General: 20-70]",
   "gender": "[patient gender - 'male' or 'female']",
-  "location": "[Santa Clara–centric named POI or specific non-medical place (no house numbers); NEVER a hospital, ER, clinic, urgent care, dialysis center, doctor's office, nursing facility, or any healthcare facility]",
-  "time": "[time in format like '3:20pm' or '11:50pm' (lowercase, no space)]",
+  "location": "[USE THIS LOCATION OR SIMILAR: '${suggestedLocation}' - You may use this exact location or create a similar one. Be specific and creative. NEVER use: yoga studios, coffee shops, Starbucks, hospitals, or medical facilities.]",
+  "time": "[USE THIS TIME OR NEARBY: '${suggestedTime}' - You may use this exact time or adjust by a few minutes. Format must be lowercase like '7:23am' or '10:47pm'. DO NOT repeat common times like 2:15pm or 3:15pm.]",
   "callerInfo": "[one of: 'A coworker called 911 and is present on scene as well.' | 'A friend called 911 and is present on scene as well.' | 'A family member called 911 and is present on scene as well.' | 'A bystander called 911 and is present on scene as well.' | 'The patient called 911 themselves.']",
   "symptoms": "[for medical scenarios: patient's symptoms in medical dispatch format]",
   "mechanism": "[for trauma scenarios: layperson phrasing of what happened, e.g., 'fell down stairs, leg pain']"
@@ -98,10 +214,10 @@ CRITICAL REQUIREMENTS:
 - Scenario MUST match requested category AND specific subcategory
 - Age must be appropriate for the scenario type and realistic
 - Gender must be 'male' or 'female'
-- Time must be lowercase hh:mmam/pm (e.g., "3:20pm") - no placeholders
+- Time: Use the suggested time or very close to it. Format must be lowercase like '7:23am' or '10:47pm'. AVOID common times ending in :15, :30, :45, or :00
 - Medical scenarios: use symptoms
 - Trauma scenarios: use mechanism (layperson phrasing)
-- Location must be Santa Clara–centric named POI or specific non-medical place; avoid house numbers; absolutely no hospitals or medical facilities
+- Location: Use the suggested location or create a similar one. ABSOLUTELY FORBIDDEN: yoga studios, fitness studios, coffee shops, Starbucks, hospitals, clinics, medical facilities. Be varied and creative!
 - CallerInfo must be one of the four provided options
 - All fields are required
 
@@ -252,11 +368,43 @@ Return ONLY the JSON object, no additional text or comments.`;
       symptoms = 'medical emergency';
     }
     
+    // Varied locations - diverse and realistic (no medical facilities or fitness studios)
+    const locations = [
+      'Whole Foods parking lot on Castro Street',
+      'WeWork coworking space on Market Street',
+      'apartment complex on University Avenue',
+      'Target store entrance',
+      'Santa Clara Public Library',
+      'Santana Row shopping district',
+      'Safeway produce section on Homestead Road',
+      'AMC theater lobby at Westfield mall',
+      'Chipotle restaurant downtown',
+      'Valley Fair parking garage',
+      'Stanford Shopping Center courtyard',
+      'soccer field at Memorial Park',
+      'Caltrain station platform',
+      'Costco Wholesale entrance',
+      'YMCA basketball court',
+      'Wells Fargo bank on First Street',
+      'In-N-Out Burger parking lot',
+      'Dave & Busters arcade',
+      'Apple Store at Valley Fair',
+      'Home Depot parking lot'
+    ];
+    
+    // Varied times - avoid common patterns like :15, :30, :45
+    const times = [
+      '7:23am', '8:47am', '9:12am', '10:38am', '11:52am',
+      '12:07pm', '1:33pm', '2:18pm', '3:42pm', '4:56pm',
+      '5:14pm', '6:29pm', '7:51pm', '8:36pm', '9:08pm',
+      '10:22pm', '11:44pm'
+    ];
+    
     return {
       age: age,
-      gender: 'male',
-      location: 'residential home on Oak Street',
-      time: '2:30 PM',
+      gender: Math.random() < 0.5 ? 'male' : 'female',
+      location: locations[Math.floor(Math.random() * locations.length)],
+      time: times[Math.floor(Math.random() * times.length)],
       callerInfo: 'A family member called 911 and is present on scene as well.',
       symptoms: symptoms
     };
@@ -492,14 +640,14 @@ Return ONLY the JSON object, no additional text or comments.`;
         messages: [
           {
             role: 'system',
-            content: 'You are an expert EMT scenario generator. Generate realistic dispatch information for emergency scenarios.'
+            content: 'You are an expert EMT scenario generator. Generate realistic dispatch information for emergency scenarios. Be creative and vary locations and times significantly for each scenario.'
           },
           {
             role: 'user',
             content: template
           }
         ],
-        temperature: 0.7,
+        temperature: 0.9,
         max_tokens: 500
       });
 
@@ -569,6 +717,14 @@ Return ONLY the JSON object, no additional text or comments.`;
         gender = gender.toLowerCase();
       }
 
+      // Track location and time to ensure variety in future generations
+      if (parsedResult.data.location) {
+        this.trackLocation(parsedResult.data.location);
+      }
+      if (parsedResult.data.time) {
+        this.trackTime(parsedResult.data.time);
+      }
+      
       // Return the dispatch information in the expected format
       return {
         error: false,

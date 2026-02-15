@@ -457,7 +457,8 @@ class BystanderManager {
       return `**[${bystander.relationship}]** I don't know much about their medical history.`;
     }
 
-    const history = patientProfile.medicalHistory || ['none'];
+    const rawHistory = patientProfile.medicalHistory;
+    const history = Array.isArray(rawHistory) ? rawHistory : (rawHistory != null ? [String(rawHistory)] : ['none']);
     if (history.length === 1 && history[0] === 'none') {
       return `**[${bystander.relationship}]** I don't think they have any major health problems.`;
     }

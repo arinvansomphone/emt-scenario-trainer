@@ -25,7 +25,7 @@ app.use(express.urlencoded({ extended: true }));
 // Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100,
+  max: 1000, // Increased for development/testing
   message: {
     error: 'Too many requests from this IP, please try again later.'
   }
@@ -80,10 +80,15 @@ async function startServer() {
       process.exit(1);
     }
 
+    // Initialize session manager with database persistence
+    const sessionManager = require('./services/sessionManager');
+    await sessionManager.enablePersistence();
+
     app.listen(PORT, () => {
       console.log(`✅ Server is running on port ${PORT}`);
       console.log(`🌍 Environment: ${process.env.NODE_ENV}`);
       console.log(`🔗 API URL: http://localhost:${PORT}/api`);
+      console.log(`💾 Database: Enabled with auto-save`);
     });
 
   } catch (error) {

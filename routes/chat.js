@@ -1,12 +1,18 @@
 // routes/chat.js
 const express = require('express');
 const ChatService = require('../services/chatService');
-const chatService = new ChatService();
+const GradingEngine = require('../services/gradingEngine');
+const sessionManager = require('../services/sessionManager');
+const ConversationSummarizer = require('../services/conversationSummarizer');
+const examAssessmentManager = require('../services/examAssessmentManager');
 const router = express.Router();
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { openai } = require('../config/openai');
+
+// Initialize summarizer
+const conversationSummarizer = new ConversationSummarizer();
 
 // Input validation middleware
 const validateChatInput = (req, res, next) => {
@@ -54,19 +60,91 @@ const validateChatInput = (req, res, next) => {
   next();
 };
 
-// Main chat endpoint
+// Main chat endpoint with session management
 router.post('/chat', validateChatInput, async (req, res) => {
   try {
-    const { message, conversation = [], scenarioData = null, seed = null } = req.body;
+    const { message, conversation = [], scenarioData = null, seed = null, sessionId = null } = req.body;
 
     console.log(`Received message: ${message.substring(0, 100)}...`);
-    console.log('Scenario data:', scenarioData);
+    
+    // Handle session management
+    let currentSessionId = sessionId;
+    let sessionState = null;
+    
+    // If no sessionId provided or session doesn't exist, create new session
+    if (!currentSessionId || !sessionManager.hasSession(currentSessionId)) {
+      console.log('🆕 Creating new session...');
+      currentSessionId = sessionManager.createSession({
+        scenarioData: scenarioData,
+        conversation: conversation,
+        sunetId: scenarioData?.sunetId
+      });
+      sessionState = sessionManager.getSession(currentSessionId);
+    } else {
+      console.log(`📦 Using existing session: ${currentSessionId}`);
+      sessionState = sessionManager.getSession(currentSessionId);
+      
+      // Update session with any new scenario data
+      if (scenarioData) {
+        sessionManager.updateSession(currentSessionId, { scenarioData });
+        sessionState = sessionManager.getSession(currentSessionId);
+      }
+    }
+
+    console.log('Scenario data:', sessionState.scenarioData);
 
     // Thread deterministic seed via scenarioData.meta.seed
-    const scenarioWithMeta = scenarioData || {};
+    const scenarioWithMeta = sessionState.scenarioData || {};
     scenarioWithMeta.meta = Object.assign({}, scenarioWithMeta.meta || {}, seed ? { seed } : {});
 
-    const result = await chatService.generateResponse(message, conversation, scenarioWithMeta);
+    // Check if summarization is needed
+    let conversationToUse = sessionState.conversation;
+    console.log('📊 Session conversation type:', typeof conversationToUse, 'IsArray:', Array.isArray(conversationToUse), 'Length:', conversationToUse?.length);
+    let summaryData = sessionState.conversationSummary;
+    
+    if (conversationSummarizer.needsSummarization(sessionState.conversation, sessionState)) {
+      console.log('🔄 Triggering conversation summarization...');
+      summaryData = await conversationSummarizer.summarizeConversation(
+        sessionState.conversation,
+        sessionState
+      );
+      
+      // Use compressed conversation for API call
+      conversationToUse = conversationSummarizer.buildCompressedConversation(
+        summaryData,
+        sessionState.conversation
+      );
+      
+      const stats = conversationSummarizer.getStatistics(sessionState, sessionState.conversation);
+      console.log(`💾 Token savings: ${stats.tokenSavings} tokens (${stats.compressionRatio} of original)`);
+    } else if (summaryData?.summary) {
+      // Use existing summary
+      conversationToUse = conversationSummarizer.buildCompressedConversation(
+        summaryData,
+        sessionState.conversation
+      );
+    }
+
+    // Create new ChatService instance (stateless)
+    const chatService = new ChatService();
+    
+    // Generate response with session state (using compressed conversation)
+    const result = await chatService.generateResponse(
+      message, 
+      conversationToUse, 
+      scenarioWithMeta,
+      sessionState // Pass full session state
+    );
+
+    // Update session with new conversation and any state changes
+    console.log('📊 Result conversation type:', typeof result.conversation, 'IsArray:', Array.isArray(result.conversation));
+    sessionManager.updateSession(currentSessionId, {
+      conversation: result.conversation || [],
+      conversationSummary: summaryData, // Store summary data
+      scenarioData: result.enhancedScenarioData || scenarioWithMeta,
+      patientState: result.patientState,
+      performance: result.performance
+    });
 
     res.json({
       success: true,
@@ -75,7 +153,8 @@ router.post('/chat', validateChatInput, async (req, res) => {
         conversation: result.conversation,
         usage: result.usage,
         additionalMessages: result.additionalMessages || [],
-        scenarioData: result.enhancedScenarioData || scenarioWithMeta // Include enhanced scenario data
+        scenarioData: result.enhancedScenarioData || scenarioWithMeta,
+        sessionId: currentSessionId // Return session ID to client
       },
       timestamp: new Date().toISOString()
     });
@@ -134,6 +213,8 @@ router.post('/summarize', validateChatInput, async (req, res) => {
 // Health check endpoint
 router.get('/health', async (req, res) => {
   try {
+    // Create temporary ChatService instance to check models
+    const chatService = new ChatService();
     const models = await chatService.getAvailableModels();
     
     res.json({
@@ -141,6 +222,7 @@ router.get('/health', async (req, res) => {
       data: {
         status: 'healthy',
         modelsAvailable: models.length > 0,
+        sessionCount: sessionManager.getSessionCount(),
         timestamp: new Date().toISOString()
       }
     });
@@ -155,25 +237,88 @@ router.get('/health', async (req, res) => {
   }
 });
 
-// Scoring endpoint using full rubric
+// Scoring endpoint using EMED111 rubric (with session support)
 router.post('/score', async (req, res) => {
   try {
-    const { conversation, scenarioData = null } = req.body || {};
+    const { conversation, scenarioData = null, sessionId = null, timeElapsed = null } = req.body || {};
 
-    if (!conversation || !Array.isArray(conversation) || conversation.length === 0) {
+    let finalConversation = conversation;
+    let finalScenarioData = scenarioData;
+
+    // If sessionId provided, get data from session
+    if (sessionId && sessionManager.hasSession(sessionId)) {
+      const sessionState = sessionManager.getSession(sessionId);
+      const sessionConv = sessionState.conversation;
+      finalConversation = Array.isArray(sessionConv) ? sessionConv : (conversation || []);
+      finalScenarioData = sessionState.scenarioData || scenarioData;
+      console.log(`📊 Scoring session: ${sessionId}`);
+    }
+
+    // Ensure conversation is always an array
+    if (!Array.isArray(finalConversation)) {
+      finalConversation = Array.isArray(conversation) ? conversation : [];
+    }
+
+    if (finalConversation.length === 0) {
       return res.status(400).json({
         success: false,
         error: 'Conversation is required for scoring'
       });
     }
 
-    const result = await chatService.generateScoredFeedback(conversation, scenarioData);
+    const timeSpentMinutes = typeof timeElapsed === 'number' && timeElapsed >= 0
+      ? Math.round(timeElapsed / 60)
+      : null;
+    const examAssessmentResults = sessionId ? examAssessmentManager.getAssessmentResults(sessionId) : null;
+
+    const gradingEngine = GradingEngine;
+    const gradingResults = gradingEngine.gradeScenario(
+      finalConversation,
+      finalScenarioData,
+      timeSpentMinutes,
+      examAssessmentResults
+    );
+    const feedbackReport = gradingEngine.generateFeedbackReport(gradingResults, finalScenarioData);
+
+    // Build rubric breakdown: each section with name, score, maxScore, and full criteria (0-3)
+    const rubricSections = gradingEngine.rubric.scoredSections;
+    const rubricBreakdown = rubricSections.map((section) => {
+      const result = gradingResults.scoredSections[section.id] || { score: 0, maxScore: section.maxScore, name: section.name, criteria: 'not attempted' };
+      return {
+        id: section.id,
+        name: section.name,
+        score: result.score,
+        maxScore: result.maxScore,
+        criteriaAchieved: result.criteria || section.criteria[0],
+        criteriaLevels: section.criteria
+      };
+    });
+
+    const totalScore = gradingResults.totalScore;
+    const maxScore = gradingEngine.rubric.totalPoints;
+    const scoreDisplay = `${totalScore}/${maxScore}`;
+
+    const feedbackParts = [
+      feedbackReport.summary.pass
+        ? `Pass. Total score: ${totalScore}/${maxScore} (${feedbackReport.summary.percentage}%).`
+        : `Did not pass. Total score: ${totalScore}/${maxScore} (${feedbackReport.summary.percentage}%).`,
+      feedbackReport.strengths.length ? `\nStrengths:\n${feedbackReport.strengths.map(s => `- ${s}`).join('\n')}` : '',
+      feedbackReport.areasForImprovement.length ? `\nAreas for improvement:\n${feedbackReport.areasForImprovement.map(a => `- ${a}`).join('\n')}` : '',
+      feedbackReport.recommendations.length ? `\nRecommendations:\n${feedbackReport.recommendations.map(r => `- ${r}`).join('\n')}` : '',
+      feedbackReport.summary.timeSpent != null ? `\nTime: ${feedbackReport.summary.timeSpent} min (limit: ${feedbackReport.summary.timeLimit} min).` : ''
+    ];
+    const feedbackText = feedbackParts.filter(Boolean).join('\n') || 'Feedback generated.';
 
     res.json({
       success: true,
       data: {
-        feedback: result.response,
-        usage: result.usage,
+        feedback: feedbackText,
+        score: scoreDisplay,
+        rubricBreakdown,
+        rubricTotalScore: totalScore,
+        rubricMaxScore: maxScore,
+        rubricPass: gradingResults.overallPass,
+        checkboxItems: feedbackReport.checkboxItems
       },
       timestamp: new Date().toISOString()
     });
@@ -190,16 +335,26 @@ router.post('/score', async (req, res) => {
 // Get EMT interventions for a scenario
 router.post('/interventions', async (req, res) => {
   try {
-    const { scenarioData } = req.body || {};
+    const { scenarioData, sessionId = null } = req.body || {};
 
-    if (!scenarioData) {
+    let finalScenarioData = scenarioData;
+    
+    // If sessionId provided, get data from session
+    if (sessionId && sessionManager.hasSession(sessionId)) {
+      const sessionState = sessionManager.getSession(sessionId);
+      finalScenarioData = sessionState.scenarioData || scenarioData;
+    }
+
+    if (!finalScenarioData) {
       return res.status(400).json({
         success: false,
         error: 'Scenario data is required to get interventions'
       });
     }
 
-    const interventions = chatService.getEmtInterventions(scenarioData);
+    // Create temporary ChatService instance
+    const chatService = new ChatService();
+    const interventions = chatService.getEmtInterventions(finalScenarioData);
 
     if (!interventions) {
       return res.status(404).json({
@@ -212,13 +367,293 @@ router.post('/interventions', async (req, res) => {
       success: true,
       data: {
         interventions: interventions,
-        scenarioType: `${scenarioData.mainScenario} - ${scenarioData.subScenario}`
+        scenarioType: `${finalScenarioData.mainScenario} - ${finalScenarioData.subScenario}`
       },
       timestamp: new Date().toISOString()
     });
 
   } catch (error) {
     console.error('Interventions endpoint error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Conversation summarization endpoint (for debugging/monitoring)
+router.get('/session/:sessionId/summary', (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    
+    if (!sessionManager.hasSession(sessionId)) {
+      return res.status(404).json({
+        success: false,
+        error: 'Session not found',
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    const sessionState = sessionManager.getSession(sessionId);
+    const conversation = sessionState.conversation || [];
+    const stats = conversationSummarizer.getStatistics(sessionState, conversation);
+    const formattedSummary = conversationSummarizer.formatSummary(sessionState.conversationSummary);
+    
+    res.json({
+      success: true,
+      data: {
+        sessionId,
+        statistics: stats,
+        summary: formattedSummary,
+        summaryData: sessionState.conversationSummary || null
+      },
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Get summary error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Database & Analytics Endpoints
+
+// Get database statistics
+router.get('/database/stats', (req, res) => {
+  try {
+    const dbManager = require('../database/databaseManager');
+    
+    if (!dbManager.isInitialized) {
+      return res.status(503).json({
+        success: false,
+        error: 'Database not initialized',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    const stats = dbManager.getStatistics();
+    const distribution = dbManager.getScenarioDistribution();
+    const dbSize = dbManager.getDatabaseSize();
+
+    res.json({
+      success: true,
+      data: {
+        database: {
+          size_mb: dbSize,
+          ...stats
+        },
+        scenarioDistribution: distribution
+      },
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Database stats error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Get student progress
+router.get('/student/:sunetId/progress', (req, res) => {
+  try {
+    const { sunetId } = req.params;
+    const dbManager = require('../database/databaseManager');
+    
+    if (!dbManager.isInitialized) {
+      return res.status(503).json({
+        success: false,
+        error: 'Database not initialized'
+      });
+    }
+
+    const progress = dbManager.getStudentProgress(sunetId);
+    const sessions = dbManager.getStudentSessions(sunetId, 20);
+
+    res.json({
+      success: true,
+      data: {
+        student: progress,
+        recentSessions: sessions
+      },
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Student progress error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Get top students leaderboard
+router.get('/leaderboard', (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 10;
+    const dbManager = require('../database/databaseManager');
+    
+    if (!dbManager.isInitialized) {
+      return res.status(503).json({
+        success: false,
+        error: 'Database not initialized'
+      });
+    }
+
+    const topStudents = dbManager.getTopStudents(limit);
+
+    res.json({
+      success: true,
+      data: {
+        leaderboard: topStudents
+      },
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Leaderboard error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Export session data (for instructors/review)
+router.get('/session/:sessionId/export', (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const dbManager = require('../database/databaseManager');
+    
+    if (!dbManager.isInitialized) {
+      // Fall back to in-memory session
+      if (!sessionManager.hasSession(sessionId)) {
+        return res.status(404).json({
+          success: false,
+          error: 'Session not found'
+        });
+      }
+      
+      const sessionData = sessionManager.exportSession(sessionId);
+      return res.json({
+        success: true,
+        data: sessionData,
+        source: 'memory',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    const sessionData = dbManager.exportSession(sessionId);
+    
+    if (!sessionData) {
+      return res.status(404).json({
+        success: false,
+        error: 'Session not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: sessionData,
+      source: 'database',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Export session error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Session management endpoints
+
+// Get session state
+router.get('/session/:sessionId', (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    
+    if (!sessionManager.hasSession(sessionId)) {
+      return res.status(404).json({
+        success: false,
+        error: 'Session not found',
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    const sessionData = sessionManager.getSession(sessionId);
+    
+    res.json({
+      success: true,
+      data: {
+        sessionId,
+        session: sessionData
+      },
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Get session error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Delete/end session
+router.delete('/session/:sessionId', (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const deleted = sessionManager.deleteSession(sessionId);
+    
+    if (!deleted) {
+      return res.status(404).json({
+        success: false,
+        error: 'Session not found',
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    res.json({
+      success: true,
+      data: {
+        message: 'Session deleted successfully',
+        sessionId
+      },
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Delete session error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Get session statistics (for monitoring)
+router.get('/sessions/stats', (req, res) => {
+  try {
+    const stats = sessionManager.getStatistics();
+    
+    res.json({
+      success: true,
+      data: stats,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Session stats error:', error.message);
     res.status(500).json({
       success: false,
       error: error.message,
