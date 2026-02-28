@@ -272,7 +272,7 @@ router.post('/score', async (req, res) => {
     const examAssessmentResults = sessionId ? examAssessmentManager.getAssessmentResults(sessionId) : null;
 
     const gradingEngine = GradingEngine;
-    const gradingResults = gradingEngine.gradeScenario(
+    const gradingResults = await gradingEngine.gradeScenario(
       finalConversation,
       finalScenarioData,
       timeSpentMinutes,

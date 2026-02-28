@@ -155,7 +155,7 @@ ${mechanismExamples}
 Fill in this template with realistic details:
 
 {
-  "location": "[MUST be varied and creative - use diverse location types: office buildings, restaurants (NOT coffee shops), parks, fitness centers, retail stores, schools, entertainment venues, transit locations, residential areas, or miscellaneous places like grocery stores, banks, car washes. Be specific with street names. NEVER use: Starbucks, coffee shops, hospitals, clinics, or medical facilities. Example: 'Safeway parking lot on Stevens Creek Boulevard', 'yoga studio in Santana Row', 'AMC theater in Westfield mall']",
+  "location": "[MUST be varied and creative - use diverse location types: office buildings, restaurants, parks, fitness centers, retail stores, schools, entertainment venues, transit locations, residential areas, or miscellaneous places like grocery stores, banks, car washes, yoga studios, coffee shops. Be specific with street names. NEVER use: hospitals, clinics, or medical facilities. Example: 'Safeway parking lot on Stevens Creek Boulevard', 'yoga studio in Santana Row', 'AMC theater in Westfield mall']",
   "time": "[time in format like '2:30 PM', '10:45 AM', '4:15 PM' - NOT 'afternoon', 'morning', or '<current time>']",
   "callerInfo": "[who called 911 - choose ONE: 'A coworker called 911 and is present on scene as well.' OR 'A friend called 911 and is present on scene as well.' OR 'A family member called 911 and is present on scene as well.' OR 'A bystander called 911 and is present on scene as well.' OR 'The patient called 911 themselves.']",
   "mechanism": "[what a 911 caller would actually say - use layperson language, NOT medical terminology. Examples: 'car accident, someone hurt' NOT 'MVC with possible injuries', 'chest pain and trouble breathing' NOT 'cardiac event', 'fell down stairs' NOT 'trauma to extremities']"
@@ -203,7 +203,7 @@ Fill in this template with realistic details:
 {
   "age": "[patient age - choose appropriate age for scenario type. Cardiac: 45-75, Trauma: 18-50, Respiratory: 25-65, Neurologic: 40-70, Metabolic: 25-60, General: 20-70]",
   "gender": "[patient gender - 'male' or 'female']",
-  "location": "[USE THIS LOCATION OR SIMILAR: '${suggestedLocation}' - You may use this exact location or create a similar one. Be specific and creative. NEVER use: yoga studios, coffee shops, Starbucks, hospitals, or medical facilities.]",
+  "location": "[USE THIS LOCATION OR SIMILAR: '${suggestedLocation}' - You may use this exact location or create a similar one. Be specific and creative. NEVER use: hospitals, clinics, or medical facilities.]",
   "time": "[USE THIS TIME OR NEARBY: '${suggestedTime}' - You may use this exact time or adjust by a few minutes. Format must be lowercase like '7:23am' or '10:47pm'. DO NOT repeat common times like 2:15pm or 3:15pm.]",
   "callerInfo": "[one of: 'A coworker called 911 and is present on scene as well.' | 'A friend called 911 and is present on scene as well.' | 'A family member called 911 and is present on scene as well.' | 'A bystander called 911 and is present on scene as well.' | 'The patient called 911 themselves.']",
   "symptoms": "[for medical scenarios: patient's symptoms in medical dispatch format]",
@@ -217,11 +217,73 @@ CRITICAL REQUIREMENTS:
 - Time: Use the suggested time or very close to it. Format must be lowercase like '7:23am' or '10:47pm'. AVOID common times ending in :15, :30, :45, or :00
 - Medical scenarios: use symptoms
 - Trauma scenarios: use mechanism (layperson phrasing)
-- Location: Use the suggested location or create a similar one. ABSOLUTELY FORBIDDEN: yoga studios, fitness studios, coffee shops, Starbucks, hospitals, clinics, medical facilities. Be varied and creative!
+- Location: Use the suggested location or create a similar one. ABSOLUTELY FORBIDDEN: hospitals, clinics, medical facilities. Be varied and creative!
 - CallerInfo must be one of the four provided options
 - All fields are required
 
 Return ONLY the JSON object, no additional text or comments.`;
+  }
+
+  /**
+   * Normalize time to required format (lowercase hh:mmam/pm)
+   * @param {string} time - Raw time string (e.g., "2:30 PM", "10:45am")
+   * @returns {string} - Normalized time or original if unparseable
+   */
+  normalizeTime(time) {
+    if (!time || typeof time !== 'string') return time;
+    const trimmed = time.trim();
+    // Match "2:30 PM", "10:45am", "12:00 p.m.", etc.
+    const match = trimmed.match(/^(\d{1,2}):(\d{2})\s*(a\.?m\.?|p\.?m\.?)\s*$/i);
+    if (match) {
+      const hour = match[1];
+      const min = match[2];
+      const ampm = /^p/i.test(match[3]) ? 'pm' : 'am';
+      return `${hour}:${min}${ampm}`;
+    }
+    return trimmed;
+  }
+
+  /**
+   * Normalize caller info to canonical format (fuzzy match to valid options)
+   * @param {string} callerInfo - Raw caller info string
+   * @returns {string} - Canonical caller option or original if no match
+   */
+  normalizeCallerInfo(callerInfo) {
+    if (!callerInfo || typeof callerInfo !== 'string') return callerInfo;
+    const s = callerInfo.trim().toLowerCase();
+    const validOptions = [
+      'A coworker called 911 and is present on scene as well.',
+      'A friend called 911 and is present on scene as well.',
+      'A family member called 911 and is present on scene as well.',
+      'A bystander called 911 and is present on scene as well.',
+      'The patient called 911 themselves.'
+    ];
+    if (validOptions.includes(callerInfo.trim())) return callerInfo.trim();
+    const keywords = ['coworker', 'friend', 'family member', 'bystander', 'patient'];
+    for (let i = 0; i < keywords.length; i++) {
+      if (s.includes(keywords[i])) return validOptions[i];
+    }
+    return callerInfo.trim();
+  }
+
+  /**
+   * Normalize parsed dispatch data before validation (fix common AI variations)
+   * @param {Object} data - Parsed dispatch data
+   * @param {string} scenarioType - Scenario type (e.g., 'Cardiac Scenario', 'MVC Scenario')
+   */
+  normalizeDispatchData(data, scenarioType) {
+    if (!data) return;
+    if (data.time) data.time = this.normalizeTime(data.time);
+    if (data.callerInfo) data.callerInfo = this.normalizeCallerInfo(data.callerInfo);
+
+    // Copy mechanism ↔ symptoms when AI filled the wrong field for scenario type
+    const lowerType = (scenarioType || '').toLowerCase();
+    const isTrauma = /mvc|fall|assault|sport|stabbing|gsw|burn|trauma/.test(lowerType);
+    if (isTrauma && !data.mechanism && data.symptoms) {
+      data.mechanism = data.symptoms;
+    } else if (!isTrauma && !data.symptoms && data.mechanism) {
+      data.symptoms = data.mechanism;
+    }
   }
 
   /**
@@ -285,7 +347,7 @@ Return ONLY the JSON object, no additional text or comments.`;
     
     // Validate symptoms/mechanism based on scenario type
     const lowerType = (scenarioType || '').toLowerCase();
-    const isTrauma = /mvc|fall|assault|stabbing|gsw|burn|trauma/.test(lowerType);
+    const isTrauma = /mvc|fall|assault|sport|stabbing|gsw|burn|trauma/.test(lowerType);
     if (isTrauma) {
       if (!dispatchData.mechanism) {
         errors.push('Missing mechanism for trauma scenario');
@@ -399,15 +461,38 @@ Return ONLY the JSON object, no additional text or comments.`;
       '5:14pm', '6:29pm', '7:51pm', '8:36pm', '9:08pm',
       '10:22pm', '11:44pm'
     ];
-    
-    return {
+
+    const isTrauma = /mvc|fall|assault|sport|stabbing|gsw|burn|trauma/.test(scenarioTypeLower);
+    const mechanisms = {
+      'mvc': 'car accident, driver injured',
+      'fall': 'fell down stairs, leg injury',
+      'assault': 'assault, person injured',
+      'sport': 'sports injury, ankle hurt',
+      'stabbing': 'stabbing, person injured',
+      'gsw': 'gunshot wound, person shot',
+      'burn': 'kitchen fire, burns'
+    };
+    let mechanism = null;
+    if (isTrauma) {
+      for (const [key, val] of Object.entries(mechanisms)) {
+        if (scenarioTypeLower.includes(key)) {
+          mechanism = val;
+          break;
+        }
+      }
+      mechanism = mechanism || 'injury, person hurt';
+    }
+
+    const result = {
       age: age,
       gender: Math.random() < 0.5 ? 'male' : 'female',
       location: locations[Math.floor(Math.random() * locations.length)],
       time: times[Math.floor(Math.random() * times.length)],
       callerInfo: 'A family member called 911 and is present on scene as well.',
-      symptoms: symptoms
+      symptoms: isTrauma ? undefined : symptoms,
+      mechanism: mechanism || undefined
     };
+    return result;
   }
 
   /**
@@ -620,10 +705,11 @@ Return ONLY the JSON object, no additional text or comments.`;
    * @returns {Object} - Generated scenario with dispatch info
    */
   async generateCompleteScenario(scenarioData) {
+    const maxRetries = 2; // 3 total attempts: initial + 2 retries
+
     try {
       console.log('🚀 Generating template-based dispatch information...');
-      
-      // Check if OpenAI is available
+
       if (!this.openai) {
         console.log('❌ OpenAI not available, returning error');
         return {
@@ -632,120 +718,135 @@ Return ONLY the JSON object, no additional text or comments.`;
           dispatchInfo: null
         };
       }
-      
+
       const template = this.generateCompleteDispatchTemplate(scenarioData.subScenario);
-      
-      const response = await this.openai.chat.completions.create({
-        model: 'gpt-4o-mini',
-        messages: [
-          {
-            role: 'system',
-            content: 'You are an expert EMT scenario generator. Generate realistic dispatch information for emergency scenarios. Be creative and vary locations and times significantly for each scenario.'
-          },
-          {
-            role: 'user',
-            content: template
-          }
-        ],
-        temperature: 0.9,
-        max_tokens: 500
-      });
+      let lastError = null;
 
-      const aiResponse = response.choices[0].message.content;
-      console.log('✅ Template response received');
-      
-      const parsedResult = this.parseTemplateResponse(aiResponse);
-      
-      if (parsedResult.error) {
-        console.log('❌ Template parsing failed:', parsedResult.message);
-        return {
-          error: true,
-          message: 'Failed to generate dispatch information',
-          dispatchInfo: null
-        };
-      }
+      for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
+        if (attempt > 1) {
+          console.log(`🔄 Retry ${attempt - 1}/${maxRetries}...`);
+        }
 
-      console.log('✅ Template parsing successful');
-      
-      // Enhanced validation with detailed feedback
-      const validation = this.validateDispatchData(parsedResult.data, scenarioData.subScenario);
-      // Enforce minimum quality score 80
-      if (validation.score < 80) {
-        return {
-          error: true,
-          message: 'Below quality threshold',
-          dispatchInfo: null
-        };
-      }
-      
-      if (!validation.isValid) {
-        console.log('⚠️ Dispatch validation failed:');
-        validation.errors.forEach(error => console.log(`  ❌ ${error}`));
-        validation.suggestions.forEach(suggestion => console.log(`  💡 ${suggestion}`));
-        console.log(`📊 Quality score: ${validation.score}/100`);
-        
-        // Use fallback if validation fails
-        console.log('❌ Validation below threshold; will signal error to caller for retry');
-        return {
-          error: true,
-          message: 'Validation failed',
-          dispatchInfo: null
-        };
-      } else {
+        const response = await this.openai.chat.completions.create({
+          model: 'gpt-4o',
+          messages: [
+            {
+              role: 'system',
+              content: 'You are an expert EMT scenario generator. Generate realistic dispatch information for emergency scenarios. Be creative and vary locations and times significantly for each scenario.'
+            },
+            {
+              role: 'user',
+              content: template
+            }
+          ],
+          temperature: 0.75,
+          max_tokens: 500
+        });
+
+        const aiResponse = response.choices[0].message.content;
+        console.log('✅ Template response received');
+
+        const parsedResult = this.parseTemplateResponse(aiResponse);
+
+        if (parsedResult.error) {
+          lastError = { message: 'Failed to generate dispatch information' };
+          console.log('❌ Template parsing failed:', parsedResult.message);
+          if (attempt <= maxRetries) continue;
+          return {
+            error: true,
+            message: lastError.message,
+            dispatchInfo: null
+          };
+        }
+
+        console.log('✅ Template parsing successful');
+
+        this.normalizeDispatchData(parsedResult.data, scenarioData.subScenario);
+        const validation = this.validateDispatchData(parsedResult.data, scenarioData.subScenario);
+
+        if (validation.score < 75) {
+          lastError = { message: 'Below quality threshold', parsedResult, validation };
+          console.log(`❌ Quality score ${validation.score}/100 below threshold`);
+          if (attempt <= maxRetries) continue;
+          return {
+            error: true,
+            message: 'Below quality threshold',
+            dispatchInfo: null
+          };
+        }
+
+        if (!validation.isValid) {
+          lastError = { message: 'Validation failed', parsedResult, validation };
+          console.log('⚠️ Dispatch validation failed:');
+          validation.errors.forEach(error => console.log(`  ❌ ${error}`));
+          validation.suggestions.forEach(suggestion => console.log(`  💡 ${suggestion}`));
+          console.log(`📊 Quality score: ${validation.score}/100`);
+          if (attempt <= maxRetries) continue;
+          console.log('❌ Validation below threshold; will signal error to caller for retry');
+          return {
+            error: true,
+            message: 'Validation failed',
+            dispatchInfo: null
+          };
+        }
+
+        // Success
         console.log('✅ Dispatch validation passed');
         if (validation.suggestions.length > 0) {
           console.log('💡 Suggestions for improvement:');
           validation.suggestions.forEach(suggestion => console.log(`  - ${suggestion}`));
         }
         console.log(`📊 Quality score: ${validation.score}/100`);
-      }
-      
-      // Use demographics from dispatch when available to keep scenario consistent
-      // Fallback to generated demographics only if missing/invalid
-      let age = parsedResult.data?.age;
-      let gender = parsedResult.data?.gender;
-      
-      const isValidGender = (g) => typeof g === 'string' && ['male', 'female'].includes(g.toLowerCase());
-      const hasValidAge = (a) => a !== undefined && a !== null && !isNaN(parseInt(String(a)));
-      
-      if (!hasValidAge(age) || !isValidGender(gender)) {
-        const generated = this.generatePatientDemographics(scenarioData.subScenario);
-        age = hasValidAge(age) ? String(age) : generated.age;
-        gender = isValidGender(gender) ? gender : generated.gender;
-      } else {
-        age = String(age);
-        gender = gender.toLowerCase();
+
+        // Use demographics from dispatch when available to keep scenario consistent
+        const isValidGender = (g) => typeof g === 'string' && ['male', 'female'].includes(g.toLowerCase());
+        const hasValidAge = (a) => a !== undefined && a !== null && !isNaN(parseInt(String(a)));
+        let age = parsedResult.data?.age;
+        let gender = parsedResult.data?.gender;
+
+        if (!hasValidAge(age) || !isValidGender(gender)) {
+          const generated = this.generatePatientDemographics(scenarioData.subScenario);
+          age = hasValidAge(age) ? String(age) : generated.age;
+          gender = isValidGender(gender) ? gender : generated.gender;
+        } else {
+          age = String(age);
+          gender = gender.toLowerCase();
+        }
+
+        if (parsedResult.data.location) {
+          this.trackLocation(parsedResult.data.location);
+        }
+        if (parsedResult.data.time) {
+          this.trackTime(parsedResult.data.time);
+        }
+
+        return {
+          error: false,
+          message: 'Scenario generated successfully',
+          dispatchInfo: parsedResult.data,
+          validation: validation,
+          patientProfile: {
+            age: age,
+            gender: gender,
+            medicalHistory: ['Unknown'],
+            medications: ['None known'],
+            allergies: ['NKDA']
+          },
+          presentation: {
+            chiefComplaint: parsedResult.data.symptoms || parsedResult.data.mechanism,
+            onsetTime: 'recent',
+            severity: 'moderate',
+            location: 'various',
+            description: `Patient presenting with ${parsedResult.data.symptoms || parsedResult.data.mechanism}`
+          }
+        };
       }
 
-      // Track location and time to ensure variety in future generations
-      if (parsedResult.data.location) {
-        this.trackLocation(parsedResult.data.location);
-      }
-      if (parsedResult.data.time) {
-        this.trackTime(parsedResult.data.time);
-      }
-      
-      // Return the dispatch information in the expected format
+      // Exhausted retries - return last error
       return {
-        error: false,
-        message: 'Scenario generated successfully',
-        dispatchInfo: parsedResult.data,
-        validation: validation,
-        // Include other scenario data for compatibility
-        patientProfile: {
-          age: age,
-          gender: gender,
-          medicalHistory: ['Unknown'],
-          medications: ['None known'],
-          allergies: ['NKDA']
-        },
-        presentation: {
-          chiefComplaint: parsedResult.data.symptoms || parsedResult.data.mechanism,
-          onsetTime: 'recent',
-          severity: 'moderate',
-          location: 'various',
-          description: `Patient presenting with ${parsedResult.data.symptoms || parsedResult.data.mechanism}`
-        }
+        error: true,
+        message: lastError?.message || 'Failed to generate dispatch information',
+        dispatchInfo: null
       };
 
     } catch (error) {

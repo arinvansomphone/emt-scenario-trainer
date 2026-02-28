@@ -21,9 +21,9 @@ module.exports = {
 
   steps: [
     {
-      description: 'Student approaches without scene safety',
+      description: 'First message returns dispatch (not patient dialogue)',
       input: 'Are you okay? What hurts?',
-      shouldContain: []
+      shouldContain: ['dispatch', 'year-old']
     },
     {
       description: 'Student asks about minor injuries before checking ABC',
@@ -52,6 +52,7 @@ module.exports = {
     }
   ],
 
+  // Critical errors: minimal rubric coverage, scores <60% (fail range)
   expectedScoreMin: 0,
   expectedScoreMax: 59
 };

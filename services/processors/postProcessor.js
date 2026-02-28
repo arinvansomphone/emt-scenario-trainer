@@ -55,6 +55,47 @@ const INAPPROPRIATE_PATTERNS = [
 
 class PostProcessor {
   /**
+   * Normalize time to required format (lowercase hh:mmam/pm)
+   * @param {string} time - Raw time string (e.g., "2:30 PM", "10:45am")
+   * @returns {string} - Normalized time or original if unparseable
+   */
+  static normalizeTime(time) {
+    if (!time || typeof time !== 'string') return time;
+    const trimmed = time.trim();
+    const match = trimmed.match(/^(\d{1,2}):(\d{2})\s*(a\.?m\.?|p\.?m\.?)\s*$/i);
+    if (match) {
+      const hour = match[1];
+      const min = match[2];
+      const ampm = /^p/i.test(match[3]) ? 'pm' : 'am';
+      return `${hour}:${min}${ampm}`;
+    }
+    return trimmed;
+  }
+
+  /**
+   * Normalize caller info to canonical format (fuzzy match to valid options)
+   * @param {string} callerInfo - Raw caller info string
+   * @returns {string} - Canonical caller option or original if no match
+   */
+  static normalizeCallerInfo(callerInfo) {
+    if (!callerInfo || typeof callerInfo !== 'string') return callerInfo;
+    const s = callerInfo.trim().toLowerCase();
+    const validOptions = [
+      'A coworker called 911 and is present on scene as well.',
+      'A friend called 911 and is present on scene as well.',
+      'A family member called 911 and is present on scene as well.',
+      'A bystander called 911 and is present on scene as well.',
+      'The patient called 911 themselves.'
+    ];
+    if (validOptions.includes(callerInfo.trim())) return callerInfo.trim();
+    const keywords = ['coworker', 'friend', 'family member', 'bystander', 'patient'];
+    for (let i = 0; i < keywords.length; i++) {
+      if (s.includes(keywords[i])) return validOptions[i];
+    }
+    return callerInfo.trim();
+  }
+
+  /**
    * Limit symptoms list to at most N items, preserving simple grammar
    * @param {string} text
    * @param {number} max
@@ -523,7 +564,7 @@ class PostProcessor {
         const age = dispatchInfo.age || '45';
         const gender = dispatchInfo.gender || 'male';
         const location = dispatchInfo.location || '1425 El Camino Real';
-        const time = (dispatchInfo.time || '2:30 PM').toLowerCase().replace(/\s*/g, '');
+        const time = this.normalizeTime(dispatchInfo.time || '2:30pm');
       // Determine content: mechanism for trauma, symptoms for medical
       const mainScenario = (scenarioData?.mainScenario || '').toLowerCase();
         const subScenario = (scenarioData?.subScenario || '').toLowerCase();
@@ -533,7 +574,7 @@ class PostProcessor {
         content = this.limitSymptoms(content, 1);
         // Override if content doesn't match selected scenario type (so dispatch is always type-appropriate)
         content = this.ensureContentMatchesScenarioType(content, scenarioData?.subScenario);
-        const callerInfo = dispatchInfo.callerInfo || 'bystander on scene';
+        const callerInfo = this.normalizeCallerInfo(dispatchInfo.callerInfo || 'A bystander called 911 and is present on scene as well.');
         
         // Build dispatch message (canonical format, no extra lines)
         let dispatchMessage = `**Dispatch:** You have been dispatched to a ${age} year-old ${gender} at ${location} at ${time} for ${content}.`;
@@ -835,7 +876,7 @@ class PostProcessor {
       
       // Extract the basic information
       const location = dispatchInfo.location || '1425 El Camino Real';
-      const time = dispatchInfo.time || '2:30 PM';
+      const time = this.normalizeTime(dispatchInfo.time || '2:30pm');
       const mechanism = dispatchInfo.mechanism || 'chest pain and shortness of breath';
       
       // Build the dispatch message
@@ -889,13 +930,15 @@ class PostProcessor {
       }
       const location = dispatchInfo?.location || '1425 El Camino Real';
       
-      // Ensure we have a proper time
-      let time = dispatchInfo?.time || '2:30 PM';
+      // Ensure we have a proper time (normalize; replace invalid placeholders)
+      let time = dispatchInfo?.time || '2:30pm';
       if (time.includes('<') || time.includes('>') || time === 'afternoon' || time === 'morning' || time === 'evening') {
-        const times = ['2:15 PM', '10:30 AM', '4:45 PM', '11:20 AM', '3:30 PM', '1:45 PM', '9:15 AM', '5:20 PM', '12:30 PM', '8:45 AM'];
+        const times = ['2:15pm', '10:30am', '4:45pm', '11:20am', '3:30pm', '1:45pm', '9:15am', '5:20pm', '12:30pm', '8:45am'];
         const ageNum = parseInt(age) || 45;
         const timeIndex = (ageNum + gender.length) % times.length;
         time = times[timeIndex];
+      } else {
+        time = this.normalizeTime(time);
       }
       
       const mechanism = dispatchInfo?.mechanism || 'chest pain and shortness of breath';

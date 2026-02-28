@@ -45,6 +45,46 @@ The EMT Scenario Trainer is an advanced simulation platform that creates dynamic
 - **Context-Aware Responses**: Intelligent scenario progression
 - **Real-time Adaptation**: Dynamic scenario adjustments
 
+## 🛠️ Local Setup
+
+### Prerequisites
+
+- Node.js 18+ and npm
+- [OpenAI API key](https://platform.openai.com/api-keys)
+
+### Quick Start
+
+1. **Clone the repository** and install dependencies:
+   ```bash
+   npm install
+   ```
+
+2. **Configure environment**:
+   ```bash
+   cp .env.example .env
+   ```
+   Edit `.env` and add your OpenAI API key:
+   ```
+   OPENAI_API_KEY=sk-...
+   ```
+
+3. **Start the server**:
+   ```bash
+   npm start
+   ```
+   Backend runs at http://localhost:3000
+
+4. **Start the frontend** (in a second terminal):
+   ```bash
+   npm run dev:frontend
+   ```
+   Open http://localhost:5173 in your browser
+
+5. **Or run both together**:
+   ```bash
+   npm run dev:all
+   ```
+
 ## 🚀 Usage
 
 ### Using the Scenario Trainer

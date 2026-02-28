@@ -725,7 +725,7 @@ class ChatService {
   }
 
   // Force end scenario for testing
-  forceEndScenario(userMessage, conversation, scenarioData) {
+  async forceEndScenario(userMessage, conversation, scenarioData) {
     // Force end with timeout reason
     const sessionId = this.generateSessionId(conversation);
     const examAssessmentResults = this.examAssessmentManager.getAssessmentResults(sessionId);
@@ -742,8 +742,8 @@ class ChatService {
       userMessage
     };
     
-    // Generate comprehensive grading using EMED111 rubric
-    const gradingResults = this.gradingEngine.gradeScenario(
+    // Generate comprehensive grading using EMED111 rubric (hybrid: keywords + AI)
+    const gradingResults = await this.gradingEngine.gradeScenario(
       conversation, 
       scenarioData, 
       timeSpent,
@@ -985,17 +985,37 @@ class ChatService {
           };
         }
         
-        // If template approach fails after retries, return error (no auto-fallback)
-        console.log('❌ Template approach failed after retries');
-        return { 
-          response: 'Error: Unable to generate a compliant dispatch after 3 attempts. Please try again.', 
-          additionalMessages: [], 
-          enhancedScenarioData: null 
+        // If template approach fails after retries, use fallback dispatch so user can still proceed
+        console.log('⚠️ Template approach failed after retries, using fallback dispatch');
+        const fallbackData = this.templateGenerator.generateFallbackDispatch(scenarioData.subScenario);
+        scenarioData.dispatchInfo = fallbackData;
+        scenarioData.generatedScenario = {
+          dispatchInfo: fallbackData,
+          patientProfile: {
+            age: fallbackData.age,
+            gender: fallbackData.gender,
+            medicalHistory: ['Unknown'],
+            medications: ['None known'],
+            allergies: ['NKDA']
+          },
+          presentation: {
+            chiefComplaint: fallbackData.symptoms || fallbackData.mechanism || 'medical emergency',
+            onsetTime: 'recent',
+            severity: 'moderate'
+          }
+        };
+        if (scenarioData.meta) scenarioData.meta.timeLimitMinutes = this.scenarioEndingManager.TIME_LIMIT_MINUTES;
+        else scenarioData.meta = { timeLimitMinutes: this.scenarioEndingManager.TIME_LIMIT_MINUTES };
+        const dispatchContent = await PostProcessor.enforceInitialDispatchMessage('', scenarioData);
+        return {
+          response: dispatchContent,
+          additionalMessages: [],
+          enhancedScenarioData: scenarioData
         };
       } catch (error) {
         console.error('❌ Failed to generate comprehensive scenario:', error);
         return { 
-          response: 'Failure to generate scenario', 
+          response: '**Sorry, we couldn\'t generate a scenario right now.** Please refresh the page and try again. If the problem persists, check that your OpenAI API key is valid.', 
           additionalMessages: [], 
           enhancedScenarioData: null 
         };
@@ -1049,8 +1069,8 @@ class ChatService {
         const sessionId = this.generateSessionId(conversation);
         const examAssessmentResults = this.examAssessmentManager.getAssessmentResults(sessionId);
         
-        // Generate comprehensive grading using EMED111 rubric
-        const gradingResults = this.gradingEngine.gradeScenario(
+        // Generate comprehensive grading using EMED111 rubric (hybrid: keywords + AI)
+        const gradingResults = await this.gradingEngine.gradeScenario(
           conversation, 
           scenarioData, 
           endingCheck.timeSpent,

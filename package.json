@@ -11,6 +11,7 @@
     "lint": "eslint .",
     "test": "node test/test-runner.js",
     "test:scenario-types": "node test/test-scenario-types.js",
+    "test:dispatch-reliability": "node test/dispatch-reliability-test.js",
     "dev:all": "concurrently -k -n backend,frontend \"nodemon server.js\" \"vite\"",
     "dev:backend": "nodemon server.js",
     "start:backend": "node server.js",
