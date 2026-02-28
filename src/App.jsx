@@ -188,21 +188,32 @@ export default function App() {
   useEffect(() => {
     const minutes = scenarioData?.meta?.timeLimitMinutes;
     const startTime = scenarioData?.meta?.startTime;
-    
-    // Only set timer if we have a time limit AND a start time has been set (scenario started)
-    // AND we haven't started the timer yet
-    if (minutes && Number.isFinite(minutes) && startTime && !isTimerRunning) {
-      // Calculate actual time left based on start time
+
+    if (!minutes || !Number.isFinite(minutes) || isTimerRunning) return;
+
+    if (startTime) {
+      // Backend set start time (normal path)
       const now = Date.now();
       const elapsedMs = now - startTime;
       const elapsedSeconds = Math.floor(elapsedMs / 1000);
       const totalSeconds = minutes * 60;
       const remainingSeconds = Math.max(0, totalSeconds - elapsedSeconds);
-      
       setTimeLeft(remainingSeconds);
       setIsTimerRunning(true);
+      return;
     }
-  }, [scenarioData, isTimerRunning]);
+
+    // Fallback for deployed frontend (e.g. GitHub Pages): if we see the scene-start message
+    // but never got meta.startTime (e.g. session on different backend instance), start timer now
+    const hasSceneStarted = messages.some(
+      (m) => m.sender === 'ai' && typeof m.text === 'string' && m.text.includes('You arrive at')
+    );
+    if (hasSceneStarted) {
+      const totalSeconds = minutes * 60;
+      setTimeLeft(totalSeconds);
+      setIsTimerRunning(true);
+    }
+  }, [scenarioData, isTimerRunning, messages]);
 
   // Auto-scroll to latest message on updates
   useEffect(() => {
@@ -577,8 +588,8 @@ export default function App() {
                 maxWidth: 'min(680px, 85%)',
                 width: 'fit-content',
                 margin: 0,
-                backgroundColor: msg.sender === 'user' ? '#9ca3af' : 'white',
-                color: msg.sender === 'user' ? 'white' : '#000000',
+                backgroundColor: msg.sender === 'user' ? '#E5E5E5' : 'white',
+                color: msg.sender === 'user' ? '#1f2937' : '#000000',
                 borderRadius: msg.sender === 'user' ? '1.5rem 1.5rem 0.5rem 1.5rem' : '1.5rem 1.5rem 1.5rem 0.5rem',
                 padding: '1rem',
                 textAlign: 'left',
