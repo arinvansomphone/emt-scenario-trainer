@@ -26,10 +26,10 @@ class ActionRecognizer {
       equipment: {
         oxygen: ['oxygen', 'o2', 'nasal cannula', 'nc', 'non-rebreather', 'nrb', 'bag valve mask', 'bvm', 'mask'],
         monitor: ['monitor', 'cardiac monitor', 'pulse oximeter', 'bp cuff', 'blood pressure cuff'],
-        airway: ['airway', 'opa', 'npa', 'oral airway', 'nasal airway', 'suction'],
+        airway: ['airway', 'opa', 'npa', 'oral airway', 'nasal airway'],
         immobilization: ['c-collar', 'cervical collar', 'backboard', 'spine board', 'splint', 'immobilize'],
         iv: ['iv', 'intravenous', 'saline', 'normal saline', 'fluid', 'line'],
-        supportiveCare: ['emesis bag', 'vomit bag', 'barf bag', 'sick bag', 'blanket', 'pillow', 'water', 'towel', 'tissue']
+        supportiveCare: ['emesis bag', 'vomit bag', 'barf bag', 'sick bag', 'blanket', 'pillow', 'water', 'towel', 'tissue', 'ice pack', 'cold pack', 'ice', 'cool pack', 'cloth', 'gauze', 'rag', 'handkerchief']
       },
       
       // Scene safety / PPE
@@ -77,13 +77,47 @@ class ActionRecognizer {
    */
   initializeActionPatterns() {
     return {
+      obDelivery: {
+        patterns: [
+          /(assist|help|support|guide)\s+(her|the\s+patient|samantha)?\s*(through\s+)?(birth|deliver|labor)/i,
+          /(assist|support|guide)\s+(the\s+)?(birth|deliver)/i,
+          /(deliver|birth)\s+(the\s+)?(baby|infant|child)/i,
+          /(manage|handle|perform)\s+(the\s+)?(deliver|birth|labor)/i,
+          /field\s+deliver/i,
+          /on[- ]scene\s+deliver/i,
+          /deliver\s+(the\s+)?baby/i,
+          /catch\s+(the\s+)?baby/i,
+          /(support|control)\s+(the\s+)?(baby'?s?\s+)?head\s+(as\s+it\s+)?(emerges?|comes?\s+out|deliver)/i,
+          /clamp\s+(and\s+cut\s+)?(the\s+)?cord/i,
+          /cut\s+(the\s+)?(umbilical\s+)?cord/i,
+          /dry\s+(and\s+)?(stimulate|warm|wrap)\s+(the\s+)?(baby|infant|newborn)/i,
+          /suctions?\s+(the\s+)?(baby'?s?|newborn'?s?|infant'?s?)\s*(mouth|airway|nose)?/i,
+          /(deliver|use|apply|give)\s+(the\s+)?suctions?\s+(to\s+)?(the\s+)?(baby|infant|newborn|mouth|airway|nose)/i,
+          /suction\s+(the\s+)?(mouth|airway|nose)\s+(of\s+)?(the\s+)?(baby|infant|newborn)/i,
+          /(use|apply)\s+suctions?\s+(on|to)\s+(the\s+)?(baby|infant|newborn|mouth|airway|nose)/i,
+          /keep\s+(the\s+)?(baby|newborn|infant)\s+warm/i,
+          /(wrap|bundle|swaddle)\s+(the\s+)?(baby|infant|newborn)/i,
+          /(wrap|bundle)\s+(him|her|them)\s+in\s+(a\s+)?(blanket|towel)/i,
+          /(give|hand|pass|return|bring)\s+(the\s+)?(baby|infant|newborn)\s+(to|back\s+to)?\s*(mom|mother|her|dad|father|parent)/i,
+          /(give|hand|pass|return)\s+(him|her|them|the\s+baby|the\s+infant|the\s+newborn)\s+(to|back\s+to)\s*(mom|mother|dad|father|parent|her)/i,
+          /(pass|hand)\s+(the\s+)?(infant|baby|newborn)\s+(back\s+to|to)\s*(the\s+)?(mother|mom|father|dad|parent)/i,
+          /(assess|check)\s+(the\s+)?(newborn|baby|infant)\s+(after|following|post)/i,
+          /(wipe|clean|clear|dry)\s+(off\s+)?(the\s+)?(fluid|mucus|blood|secretion|debris|mouth|face|airway)\s*(off\s+)?(of\s+)?(the\s+)?(baby|infant|newborn)/i,
+          /(wipe|clean|clear)\s+(the\s+)?(baby|infant|newborn)'?s?\s*(mouth|face|airway|nose|fluid|mucus)/i,
+          /(remove|wipe\s+away?|clear)\s+(any\s+)?(fluid|mucus|blood|secretion|debris)\s*(from\s+)?(the\s+)?(baby|infant|newborn|mouth|face|airway)?/i,
+          /wipe\s+away\s+(the\s+)?(fluid|mucus|blood|secretion|debris)\s*(from\s+)?(the\s+)?(baby|infant|newborn|mouth|face|airway)/i,
+          /(wipe|clean|clear|remove)\s+(the\s+)?(fluid|mucus|blood|secretion|debris|mess)\s*(from|off|away)?\s*(the\s+)?(baby|infant|newborn)/i
+        ],
+        priority: 0
+      },
+
       vitalCheck: {
         patterns: [
           /check\s+(.*?)\s*(vital|pulse|bp|heart rate|breathing|temperature|oxygen)/i,
           /take\s+(.*?)\s*(vital|pulse|bp|heart rate|breathing|temperature|oxygen)/i,
           /measure\s+(.*?)\s*(vital|pulse|bp|heart rate|breathing|temperature|oxygen)/i,
           /get\s+(.*?)\s*(vital|pulse|bp|heart rate|breathing|temperature|oxygen)/i,
-          /(pulse|bp|heart rate|breathing|temperature|oxygen|vital)/i
+          /\b(pulse|bp|heart\s+rate|temperature|oxygen|vital\s+signs?)\b/i
         ],
         priority: 1
       },
@@ -154,12 +188,31 @@ class ActionRecognizer {
         priority: 1
       },
       
+      obExam: {
+        patterns: [
+          /(check|expose|inspect|examine|look\s+at|visualize|evaluate)\s+(the\s+)?(vaginal|perineal|perineum|birth\s+canal|genital|groin)\s*(area|region)?/i,
+          /(expose|check|inspect|examine|look\s+at)\s+(her\s+)?(vaginal|perineal|perineum|birth\s+canal|genital)\s*(area|region)?/i,
+          /(do\s+i|can\s+i|i)\s+see\s+(the\s+)?(baby|head|crowning)/i,
+          /(is\s+(the\s+)?)?(baby|head|crowning)\s*(visible|showing|presenting|out|coming)/i,
+          /(check|look)\s+(for\s+)?crowning/i,
+          /crowning/i,
+          /(imminent|impending)\s+deliver/i,
+          /(perineal|vaginal|birth\s+canal)\s+(check|exam|assessment|inspection)/i
+        ],
+        priority: 1
+      },
+
       supportiveCare: {
         patterns: [
           /(give|offer|provide|hand)\s+(her|him|them|the\s+patient)?\s*(an?\s+)?(emesis\s+bag|vomit\s+bag|barf\s+bag|sick\s+bag)/i,
-          /(give|offer|provide|hand)\s+(her|him|them|the\s+patient)?\s*(an?\s+)?(blanket|pillow|water|towel|tissue)/i,
+          /(give|offer|provide|hand)\s+(her|him|them|the\s+patient)?\s*(an?\s+)?(blanket|pillow|water|towel|tissue|ice\s+pack|cold\s+pack|cool\s+pack|ice|cloth|gauze|rag|handkerchief)/i,
+          /(place|put|drape|wrap|apply|hold)\s+(an?\s+)?(blanket|towel|pillow|ice\s+pack|cold\s+pack|cool\s+pack|ice|cloth|gauze|rag)\s*(on|over|around|to|against|up\s+to)?\s*(the\s+)?(patient|her|him|them|face|eye|head|swelling|injury|area|nose|wound)?/i,
+          /(give|hand|provide)\s+(patient|her|him|them)\s+(cloth|gauze|towel|tissue|rag)\s+(for|to\s+(stop|control|hold|pinch|apply\s+pressure))/i,
           /(place|put)\s+(an?\s+)?(emesis\s+bag|vomit\s+bag|barf\s+bag)\s+(nearby|next\s+to|beside)/i,
-          /get\s+(her|him|them|the\s+patient)?\s*(an?\s+)?(emesis\s+bag|vomit\s+bag|blanket|water)/i
+          /get\s+(her|him|them|the\s+patient)?\s*(an?\s+)?(emesis\s+bag|vomit\s+bag|blanket|water|ice\s+pack|cold\s+pack|cool\s+pack|ice|cloth|gauze|towel|tissue)/i,
+          /(ice\s+pack|cold\s+pack|cool\s+pack)\s+(to|for|on|applied?\s+to)/i,
+          /(direct\s+pressure|pinch|pressure)\s+(to|on)\s+(the\s+)?(nose|wound|injury|bleed|bleeding)/i,
+          /\b(nose\s*bleed|epistaxis|bleeding\s+nose)\b/i
         ],
         priority: 2
       },
@@ -257,6 +310,14 @@ class ActionRecognizer {
         details.safetyAction = this.identifySceneSafetyAction(normalized);
         break;
         
+      case 'obDelivery':
+        details.deliveryStep = this.identifyDeliveryStep(normalized);
+        break;
+
+      case 'obExam':
+        details.examType = 'perineal_inspection';
+        break;
+
       case 'supportiveCare':
         details.careItem = this.identifySupportiveCareItem(normalized);
         details.careAction = this.identifySupportiveCareAction(normalized);
@@ -459,11 +520,15 @@ class ActionRecognizer {
    */
   identifySupportiveCareItem(normalized) {
     if (/(emesis\s+bag|vomit\s+bag|barf\s+bag|sick\s+bag)/.test(normalized)) return 'emesis bag';
+    if (/(ice\s+pack|cold\s+pack|cool\s+pack)/.test(normalized)) return 'ice pack';
+    if (/\bice\b/.test(normalized)) return 'ice pack';
     if (/blanket/.test(normalized)) return 'blanket';
     if (/pillow/.test(normalized)) return 'pillow';
     if (/water/.test(normalized)) return 'water';
+    if (/(gauze|cloth|rag|handkerchief)/.test(normalized)) return 'cloth';
     if (/towel/.test(normalized)) return 'towel';
     if (/tissue/.test(normalized)) return 'tissue';
+    if (/(nose\s*bleed|epistaxis|bleeding\s+nose)/.test(normalized)) return 'cloth';
     return 'supportive care item';
   }
 
@@ -507,6 +572,24 @@ class ActionRecognizer {
   }
 
   /**
+   * Identify the specific step in an OB delivery being performed
+   * @param {string} normalized - Normalized message
+   * @returns {string} - Delivery step identifier
+   */
+  identifyDeliveryStep(normalized) {
+    if (/(wrap|bundle|swaddle).*(baby|infant|newborn)|(baby|infant|newborn).*(wrap|bundle|swaddle)/.test(normalized)) return 'newborn_wrap';
+    if (/(give|hand|pass|return|bring).*(mom|mother|dad|father|parent)|(mom|mother|dad|father|parent).*(give|hand|pass|return|bring)/.test(normalized)) return 'newborn_handoff';
+    if (/(clamp|cut).*(cord)|(cord).*(clamp|cut)/.test(normalized)) return 'cord_management';
+    if (/suction/.test(normalized)) return 'newborn_suction';
+    if (/(wipe|clean|clear).*(fluid|mucus|blood|mouth|face|airway|nose)|(fluid|mucus|blood).*(wipe|clean|clear|off|away)/.test(normalized)) return 'newborn_cleaning';
+    if (/(dry|stimulate|warm|wrap).*(baby|infant|newborn)/.test(normalized)) return 'newborn_care';
+    if (/(catch|deliver|birth|support).*(baby|infant|head)/.test(normalized)) return 'delivery';
+    if (/(assess|check).*(newborn|baby|infant)/.test(normalized)) return 'newborn_assessment';
+    if (/(assist|help|support|guide).*(birth|deliver|labor)/.test(normalized)) return 'active_labor_support';
+    return 'general_delivery';
+  }
+
+  /**
    * Recognize general medical actions when specific patterns don't match
    * @param {string} normalized - Normalized message
    * @param {string} original - Original message
@@ -519,7 +602,10 @@ class ActionRecognizer {
     Object.entries(this.medicalTerms).forEach(([category, terms]) => {
       Object.entries(terms).forEach(([termType, variations]) => {
         variations.forEach(variation => {
-          if (normalized.includes(variation)) {
+          // Use word-boundary regex to avoid substring false positives (e.g. "iv" inside "deliver")
+          const escaped = variation.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const wordBoundaryRe = new RegExp(`\\b${escaped}\\b`, 'i');
+          if (wordBoundaryRe.test(normalized)) {
             foundTerms.push({ category, termType, term: variation });
           }
         });

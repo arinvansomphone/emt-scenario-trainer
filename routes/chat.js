@@ -98,7 +98,7 @@ router.post('/chat', validateChatInput, async (req, res) => {
     scenarioWithMeta.meta = Object.assign({}, scenarioWithMeta.meta || {}, seed ? { seed } : {});
 
     // Check if summarization is needed
-    let conversationToUse = sessionState.conversation;
+    let conversationToUse = Array.isArray(sessionState.conversation) ? sessionState.conversation : [];
     console.log('📊 Session conversation type:', typeof conversationToUse, 'IsArray:', Array.isArray(conversationToUse), 'Length:', conversationToUse?.length);
     let summaryData = sessionState.conversationSummary;
     
@@ -290,7 +290,8 @@ router.post('/score', async (req, res) => {
         score: result.score,
         maxScore: result.maxScore,
         criteriaAchieved: result.criteria || section.criteria[0],
-        criteriaLevels: section.criteria
+        criteriaLevels: section.criteria,
+        feedback: result.feedback || []
       };
     });
 

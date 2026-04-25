@@ -153,6 +153,10 @@ class GradingEngine {
   // Grade the entire scenario (async: uses AI for scored sections when enabled)
   async gradeScenario(conversation, scenarioData, timeSpentMinutes, examAssessmentResults = null) {
     console.log('🎯 Starting scenario grading...');
+    if (!Array.isArray(conversation)) {
+      console.warn('⚠️ gradeScenario received non-array conversation, defaulting to empty array');
+      conversation = [];
+    }
 
     // Checkbox items: keyword-based (kept for protocol compliance)
     const checkboxItems = this.gradeCheckboxItems(conversation, scenarioData);
@@ -542,6 +546,7 @@ class GradingEngine {
 
   // Helper methods
   getConversationText(conversation) {
+    if (!Array.isArray(conversation)) return '';
     // Include both user (student) and assistant (patient) messages for grading.
     // Student questions elicit patient responses; both reflect assessment quality.
     return conversation
@@ -560,6 +565,7 @@ class GradingEngine {
   }
 
   countRelevantInteractions(conversation, keywords) {
+    if (!Array.isArray(conversation)) return 0;
     // Count interactions in both user (student) and assistant (patient) messages.
     let count = 0;
     const messages = conversation.filter(msg => msg && (msg.role === 'user' || msg.role === 'assistant'));
@@ -575,21 +581,36 @@ class GradingEngine {
 
   generateSectionFeedback(conversationText, section, score) {
     const feedback = [];
-    
-    if (score === 0) {
-      feedback.push(`${section.name} was not attempted or not evident in the conversation.`);
-    } else if (score === 1) {
-      feedback.push(`${section.name} was attempted but incomplete or poorly executed.`);
-    } else if (score === 2) {
-      feedback.push(`${section.name} was adequately performed.`);
-    } else {
-      feedback.push(`${section.name} was excellently performed.`);
+    const maxScore = section.maxScore;
+
+    // If the user got full points, no improvement feedback needed
+    if (score >= maxScore) {
+      return feedback;
     }
 
-    // Add specific suggestions based on missing elements
-    const keywordFound = this.checkKeywordsInConversation(conversationText, section.keywords);
-    if (!keywordFound) {
-      feedback.push(`Consider including: ${section.keywords.slice(0, 3).join(', ')}`);
+    // Explain what's needed to reach the next level by referencing the rubric criteria
+    const nextLevel = score + 1;
+    const nextCriteria = section.criteria?.[nextLevel];
+    if (nextCriteria) {
+      feedback.push(`To earn ${nextLevel} point${nextLevel === 1 ? '' : 's'}, you need to ${nextCriteria}.`);
+    }
+
+    // If they're not at max yet, also describe what full points requires
+    if (nextLevel < maxScore) {
+      const topCriteria = section.criteria?.[maxScore];
+      if (topCriteria) {
+        feedback.push(`For full credit (${maxScore} points), ${topCriteria}.`);
+      }
+    }
+
+    // Suggest specific keywords/topics that were missing from the conversation
+    const missingKeywords = (section.keywords || []).filter(kw => {
+      const normalizedKeyword = TextNormalizer.normalizeToAsciiLower(kw);
+      const normalizedText = TextNormalizer.normalizeToAsciiLower(conversationText);
+      return !normalizedText.includes(normalizedKeyword);
+    });
+    if (missingKeywords.length > 0) {
+      feedback.push(`Topics/elements that were missing or could be addressed: ${missingKeywords.slice(0, 5).join(', ')}.`);
     }
 
     return feedback;

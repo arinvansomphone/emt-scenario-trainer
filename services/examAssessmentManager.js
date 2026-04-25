@@ -178,26 +178,32 @@ class ExamAssessmentManager {
   detectExamIntent(userMessage) {
     const normalized = TextNormalizer.normalizeToAsciiLower(userMessage);
     
-    // Focused exam patterns
+    // Focused exam patterns — accept "physical", "exam", or "assessment" as the noun
     const focusedPatterns = [
-      /(?:perform|do|conduct)\s+(?:a\s+)?focused\s+(?:physical\s+)?exam/,
-      /(?:want\s+to\s+)?(?:perform|do|examine)\s+(?:a\s+)?focused\s+(?:assessment|exam)/,
-      /focused\s+(?:physical\s+)?(?:exam|assessment)/
+      /(?:perform|do|conduct|run)\s+(?:a\s+)?(?:full\s+)?focused\s+(?:physical|exam|assessment)/,
+      /(?:want\s+to\s+)?(?:perform|do|examine)\s+(?:a\s+)?focused\s+(?:physical|assessment|exam)/,
+      /focused\s+(?:physical(?:\s+exam)?|exam|assessment)/
     ];
 
     // Rapid trauma patterns
     const rapidPatterns = [
-      /(?:perform|do|conduct)\s+(?:a\s+)?rapid\s+(?:trauma\s+)?(?:exam|assessment)/,
-      /rapid\s+(?:trauma\s+)?(?:exam|assessment|survey)/,
-      /(?:want\s+to\s+)?(?:perform|do)\s+(?:a\s+)?rapid\s+(?:physical\s+)?exam/
+      /(?:perform|do|conduct|run)\s+(?:a\s+)?rapid\s+(?:trauma\s+)?(?:physical|exam|assessment)/,
+      /rapid\s+(?:trauma\s+)?(?:physical|exam|assessment|survey)/,
+      /(?:want\s+to\s+)?(?:perform|do)\s+(?:a\s+)?rapid\s+(?:trauma\s+)?(?:physical|exam)/
     ];
 
-    // Full secondary patterns
+    // Full secondary / full body / head-to-toe patterns
     const secondaryPatterns = [
-      /(?:perform|do|conduct)\s+(?:a\s+)?(?:full\s+)?secondary\s+(?:exam|assessment)/,
-      /(?:full\s+)?secondary\s+(?:exam|assessment|survey)/,
+      /(?:perform|do|conduct|run)\s+(?:a\s+)?(?:full\s+)?secondary\s+(?:physical|exam|assessment)/,
+      /(?:full\s+)?secondary\s+(?:physical|exam|assessment|survey)/,
       /(?:want\s+to\s+)?(?:perform|do)\s+(?:a\s+)?(?:full\s+)?secondary\s+(?:physical\s+)?exam/,
-      /detailed\s+(?:physical\s+)?(?:exam|assessment)/
+      /detailed\s+(?:physical\s+)?(?:exam|assessment)/,
+      // "full physical", "complete physical", "full body exam", "complete assessment"
+      /(?:perform|do|conduct|run)\s+(?:a\s+)?(?:full|complete|whole|entire)\s+(?:body\s+)?(?:physical|exam|assessment)(?:\s+(?:exam|assessment))?/,
+      /(?:full|complete|whole|entire)\s+(?:body\s+)?(?:physical|exam|assessment)\b/,
+      // head-to-toe variants
+      /(?:perform|do|conduct|run)\s+(?:a\s+)?head[\s-]to[\s-]toe(?:\s+(?:physical|exam|assessment|survey))?/,
+      /head[\s-]to[\s-]toe(?:\s+(?:physical|exam|assessment|survey))?/
     ];
 
     // Detect body region for focused exams

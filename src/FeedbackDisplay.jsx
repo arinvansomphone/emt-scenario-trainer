@@ -12,6 +12,28 @@ export default function FeedbackDisplay() {
   const rubricTotalScore = location.state?.rubricTotalScore;
   const rubricMaxScore = location.state?.rubricMaxScore;
   const rubricPass = location.state?.rubricPass;
+  const checkboxItems = location.state?.checkboxItems || null;
+
+  // Group checkbox items by category (Pre-Arrival & Scene Size-Up, Primary Survey & Resuscitation, Disposition)
+  const checkboxByCategory = (() => {
+    if (!checkboxItems?.details) return null;
+    const groups = {};
+    Object.entries(checkboxItems.details).forEach(([id, item]) => {
+      const category = item.category || 'Other';
+      if (!groups[category]) groups[category] = [];
+      groups[category].push({ id, ...item });
+    });
+    // Preserve canonical EMED111 order
+    const order = ['Pre-Arrival & Scene Size-Up', 'Primary Survey & Resuscitation', 'Disposition'];
+    return order
+      .filter((cat) => groups[cat])
+      .map((cat) => ({ category: cat, items: groups[cat] }))
+      .concat(
+        Object.keys(groups)
+          .filter((cat) => !order.includes(cat))
+          .map((cat) => ({ category: cat, items: groups[cat] }))
+      );
+  })();
 
   // If no feedback data, redirect back
   if (!feedbackData) {
@@ -202,6 +224,96 @@ export default function FeedbackDisplay() {
             )}
           </div>
 
+          {/* Critical Checkbox Items - all required to pass */}
+          {checkboxByCategory && checkboxByCategory.length > 0 && (
+            <div style={{
+              backgroundColor: 'white',
+              borderRadius: '20px',
+              padding: '2rem',
+              marginBottom: '1.5rem',
+              boxShadow: '0 10px 24px rgba(0, 0, 0, 0.12)'
+            }}>
+              <h2 style={{
+                fontSize: '1.5rem',
+                fontWeight: 'bold',
+                color: '#000',
+                marginBottom: '0.5rem',
+                marginTop: 0
+              }}>
+                Critical Checkbox Items
+              </h2>
+              <p style={{ fontSize: '0.9rem', color: '#6b7280', marginBottom: '1.5rem' }}>
+                All items must be completed to pass — {checkboxItems.completed}/{checkboxItems.total} completed
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                {checkboxByCategory.map(({ category, items }) => {
+                  const completedInGroup = items.filter((i) => i.completed).length;
+                  const allDone = completedInGroup === items.length;
+                  return (
+                    <div key={category} style={{
+                      padding: '1rem',
+                      backgroundColor: '#f9fafb',
+                      borderRadius: '10px',
+                      borderLeft: `4px solid ${allDone ? '#10b981' : '#ef4444'}`
+                    }}>
+                      <div style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        marginBottom: '0.75rem'
+                      }}>
+                        <span style={{
+                          fontWeight: '600',
+                          color: '#000',
+                          fontSize: '1rem'
+                        }}>
+                          {category}
+                        </span>
+                        <span style={{
+                          fontWeight: 'bold',
+                          color: allDone ? '#10b981' : '#ef4444',
+                          fontSize: '1rem'
+                        }}>
+                          {completedInGroup}/{items.length}
+                        </span>
+                      </div>
+                      <ul style={{
+                        listStyle: 'none',
+                        padding: 0,
+                        margin: 0,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '0.4rem'
+                      }}>
+                        {items.map((item) => (
+                          <li key={item.id} style={{
+                            display: 'flex',
+                            alignItems: 'flex-start',
+                            gap: '0.6rem',
+                            padding: '0.5rem 0.6rem',
+                            backgroundColor: item.completed ? '#d1fae5' : '#fee2e2',
+                            borderRadius: '6px',
+                            fontSize: '0.9rem',
+                            color: item.completed ? '#065f46' : '#991b1b'
+                          }}>
+                            <span style={{
+                              fontWeight: 'bold',
+                              minWidth: '1.2rem',
+                              lineHeight: 1.4
+                            }}>
+                              {item.completed ? '✓' : '✗'}
+                            </span>
+                            <span style={{ lineHeight: 1.4 }}>{item.description}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Rubric Breakdown - from EMED111 rubric when available */}
           {rubricBreakdown && rubricBreakdown.length > 0 ? (
             <div style={{
@@ -298,6 +410,25 @@ export default function FeedbackDisplay() {
                           );
                         })}
                       </div>
+                      {/* Explanation shown only when score is not perfect */}
+                      {section.score < section.maxScore && section.feedback && section.feedback.length > 0 && (
+                        <div style={{
+                          marginTop: '0.75rem',
+                          padding: '0.6rem 0.75rem',
+                          backgroundColor: '#fffbeb',
+                          borderRadius: '6px',
+                          borderLeft: '3px solid #f59e0b',
+                          fontSize: '0.85rem',
+                          color: '#78350f'
+                        }}>
+                          <div style={{ fontWeight: '600', marginBottom: '0.25rem' }}>Why you didn&apos;t receive full points:</div>
+                          {section.feedback.map((line, i) => (
+                            <div key={i} style={{ marginBottom: i < section.feedback.length - 1 ? '0.2rem' : 0 }}>
+                              • {line}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   );
                 })}

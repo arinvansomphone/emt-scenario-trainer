@@ -176,7 +176,7 @@ Return ONLY the JSON object, no additional text or comments.`;
    * @param {string} scenarioType - Type of scenario (e.g., 'Cardiac Scenario')
    * @returns {string} - Template prompt
    */
-  generateCompleteDispatchTemplate(scenarioType) {
+  generateCompleteDispatchTemplate(scenarioType, difficulty) {
     const traumaScenarios = ['MVC Scenario', 'Fall Scenario', 'Assault Scenario', 'Sport Injury Scenario', 'Stabbing Scenario', 'GSW Scenario', 'Burn Scenario'];
     const isTrauma = traumaScenarios.includes(scenarioType);
     
@@ -191,10 +191,19 @@ Return ONLY the JSON object, no additional text or comments.`;
     // Get suggested location and time to guide variety
     const suggestedLocation = this.getRandomUnusedLocation();
     const suggestedTime = this.getRandomUnusedTime();
+
+    const difficultyInstructions = {
+      novice: `DIFFICULTY: BEGINNER — Generate a straightforward, single clear chief complaint. Patient has EXACTLY ONE condition or injury — no comorbidities, no secondary complaints, no complicating factors. Symptoms or mechanism must be unambiguous and textbook. Severity should be mild to moderate.`,
+      intermediate: `DIFFICULTY: INTERMEDIATE — Generate a moderately complex presentation. Patient has one primary condition and may have one complicating factor or slightly atypical symptom pattern. Severity should be moderate. There may be minor diagnostic ambiguity.`,
+      advanced: `DIFFICULTY: HARD — Generate a complex, high-acuity presentation. Patient should have multiple complaints or an unusual presentation. Symptoms/mechanism may be vague or overlap with other conditions. Severity should be severe or critical.`
+    };
+    const difficultyBlock = difficultyInstructions[difficulty] || difficultyInstructions.novice;
     
     return `Generate complete dispatch information for a ${scenarioType}. 
 
 ${categoryRequirement}
+
+${difficultyBlock}
 
 ${mechanismExamples}
 
@@ -700,6 +709,34 @@ Return ONLY the JSON object, no additional text or comments.`;
   }
 
   /**
+   * Generate a random first name appropriate to the patient's gender and age
+   * @param {string} gender - 'male' or 'female'
+   * @param {number|string} age - Patient age
+   * @returns {string} - First name
+   */
+  generatePatientName(gender, age) {
+    const ageNum = parseInt(age) || 40;
+
+    // Older names (60+) vs younger/mid names
+    const maleNamesOlder = ['Robert', 'Richard', 'William', 'James', 'Charles', 'David', 'Thomas', 'Gary', 'Donald', 'Kenneth'];
+    const maleNamesMid   = ['Michael', 'Christopher', 'Jason', 'Brian', 'Kevin', 'Mark', 'Steven', 'Timothy', 'Jeffrey', 'Scott'];
+    const maleNamesYoung = ['Tyler', 'Jordan', 'Cameron', 'Logan', 'Ethan', 'Austin', 'Nathan', 'Ryan', 'Dylan', 'Alex'];
+
+    const femaleNamesOlder = ['Barbara', 'Patricia', 'Linda', 'Sandra', 'Carol', 'Betty', 'Ruth', 'Dorothy', 'Helen', 'Nancy'];
+    const femaleNamesMid   = ['Jennifer', 'Karen', 'Lisa', 'Susan', 'Michelle', 'Laura', 'Angela', 'Melissa', 'Kimberly', 'Amy'];
+    const femaleNamesYoung = ['Emma', 'Olivia', 'Mia', 'Madison', 'Sophia', 'Alyssa', 'Taylor', 'Kayla', 'Brittany', 'Samantha'];
+
+    let pool;
+    if (gender === 'female') {
+      pool = ageNum >= 60 ? femaleNamesOlder : ageNum >= 40 ? femaleNamesMid : femaleNamesYoung;
+    } else {
+      pool = ageNum >= 60 ? maleNamesOlder : ageNum >= 40 ? maleNamesMid : maleNamesYoung;
+    }
+
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+
+  /**
    * Generate complete scenario using template-based approach
    * @param {Object} scenarioData - Input scenario data
    * @returns {Object} - Generated scenario with dispatch info
@@ -719,7 +756,7 @@ Return ONLY the JSON object, no additional text or comments.`;
         };
       }
 
-      const template = this.generateCompleteDispatchTemplate(scenarioData.subScenario);
+      const template = this.generateCompleteDispatchTemplate(scenarioData.subScenario, scenarioData.difficulty);
       let lastError = null;
 
       for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
@@ -820,14 +857,36 @@ Return ONLY the JSON object, no additional text or comments.`;
           this.trackTime(parsedResult.data.time);
         }
 
+        const name = this.generatePatientName(gender, age);
+
+        // Map user-selected difficulty to the internal difficulty object used by
+        // chatService, patientSimulator, and performanceEvaluator.
+        const difficultyDescriptions = {
+          novice:       'Stable patient with clear symptoms, responsive to treatment',
+          intermediate: 'Moderately distressed patient with some complications',
+          advanced:     'Critical patient with multiple issues and rapid changes'
+        };
+        const difficultyLevel = ['novice', 'intermediate', 'advanced'].includes(scenarioData.difficulty)
+          ? scenarioData.difficulty
+          : 'novice';
+        const difficultyObj = {
+          level: difficultyLevel,
+          name: difficultyLevel.charAt(0).toUpperCase() + difficultyLevel.slice(1),
+          description: difficultyDescriptions[difficultyLevel]
+        };
+
+        const severityMap = { novice: 'mild', intermediate: 'moderate', advanced: 'severe' };
+
         return {
           error: false,
           message: 'Scenario generated successfully',
           dispatchInfo: parsedResult.data,
           validation: validation,
+          difficulty: difficultyObj,
           patientProfile: {
             age: age,
             gender: gender,
+            name: name,
             medicalHistory: ['Unknown'],
             medications: ['None known'],
             allergies: ['NKDA']
@@ -835,7 +894,7 @@ Return ONLY the JSON object, no additional text or comments.`;
           presentation: {
             chiefComplaint: parsedResult.data.symptoms || parsedResult.data.mechanism,
             onsetTime: 'recent',
-            severity: 'moderate',
+            severity: severityMap[difficultyLevel] || 'moderate',
             location: 'various',
             description: `Patient presenting with ${parsedResult.data.symptoms || parsedResult.data.mechanism}`
           }

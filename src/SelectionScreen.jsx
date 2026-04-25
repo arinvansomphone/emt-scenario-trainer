@@ -8,6 +8,7 @@ export default function SelectionScreen() {
   const [selectedScenario, setSelectedScenario] = useState('');
   const [medicalSubScenario, setMedicalSubScenario] = useState('');
   const [traumaSubScenario, setTraumaSubScenario] = useState('');
+  const [difficulty, setDifficulty] = useState('novice');
 
   const scenarios = [
     'Medical Scenario',
@@ -89,7 +90,8 @@ export default function SelectionScreen() {
       const scenarioData = {
         sunetId: sunetId,
         mainScenario: selectedScenario,
-        subScenario: finalSubScenario
+        subScenario: finalSubScenario,
+        difficulty: difficulty
       };
       
       // Navigate to app with scenario data
@@ -234,6 +236,45 @@ export default function SelectionScreen() {
                 </select>
               </div>
             )}
+
+            <div>
+              <label style={{
+                display: 'block',
+                marginBottom: '0.5rem',
+                color: '#000000',
+                fontSize: '0.875rem',
+                fontWeight: '500'
+              }}>
+                Difficulty
+              </label>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                {[
+                  { value: 'novice',       label: 'Beginner',     active: '#16a34a', bg: '#dcfce7', text: '#14532d' },
+                  { value: 'intermediate', label: 'Intermediate',  active: '#d97706', bg: '#fef3c7', text: '#78350f' },
+                  { value: 'advanced',     label: 'Hard',          active: '#dc2626', bg: '#fee2e2', text: '#7f1d1d' }
+                ].map(({ value, label, active, bg, text }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setDifficulty(value)}
+                    style={{
+                      flex: 1,
+                      padding: '0.5rem 0',
+                      borderRadius: '0.5rem',
+                      border: `2px solid ${difficulty === value ? active : '#D1D5DB'}`,
+                      backgroundColor: difficulty === value ? bg : 'white',
+                      color: difficulty === value ? text : '#6B7280',
+                      fontWeight: difficulty === value ? '600' : '400',
+                      fontSize: '0.875rem',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
 
             <button
               type="submit"

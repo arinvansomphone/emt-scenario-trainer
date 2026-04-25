@@ -199,10 +199,12 @@ UPDATED SUMMARY:`;
    * @returns {Array} - Compressed conversation array
    */
   buildCompressedConversation(summaryData, fullConversation) {
+    const safeConversation = Array.isArray(fullConversation) ? fullConversation : [];
     if (!summaryData || !summaryData.summary) {
       // No summary available, use full conversation
-      return fullConversation;
+      return safeConversation;
     }
+    fullConversation = safeConversation;
 
     // Build compressed version: [summary message] + [recent messages]
     const compressed = [];

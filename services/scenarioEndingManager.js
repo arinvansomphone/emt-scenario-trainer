@@ -29,23 +29,8 @@ class ScenarioEndingManager {
       };
     }
 
-    // Check for time limit
+    // Time limit disabled
     const timeSpent = this.calculateTimeSpent(scenarioStartTime);
-    // Convert to milliseconds for more precise comparison
-    const timeSpentMs = (Date.now() - scenarioStartTime);
-    const timeLimitMs = this.TIME_LIMIT_MINUTES * 60 * 1000;
-    
-    console.log(`⏱️ Precise time check: ${timeSpentMs}ms elapsed of ${timeLimitMs}ms limit`);
-    
-    if (timeSpentMs >= timeLimitMs) {
-      return {
-        shouldEnd: true,
-        reason: 'timeout',
-        trigger: `Time limit reached (${this.TIME_LIMIT_MINUTES} minutes)`,
-        timeSpent
-      };
-    }
-
     return {
       shouldEnd: false,
       timeSpent

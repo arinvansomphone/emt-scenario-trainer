@@ -53,6 +53,7 @@ export default function App() {
   const [micLevel, setMicLevel] = useState(0);
   const inputRef = useRef(null);
   const [backendConnected, setBackendConnected] = useState(true); // Track backend connection
+  const [isSpeaking, setIsSpeaking] = useState(true); // TTS voice output on by default
   const [sessionId, setSessionId] = useState(null); // Track session ID for state management
   const [isEndingScenario, setIsEndingScenario] = useState(false); // Track end scenario loading state
 
@@ -60,6 +61,25 @@ export default function App() {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
+  };
+
+  // Speak AI response text using browser Web Speech API (free, no backend needed)
+  const speakText = (text) => {
+    if (!window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    if (!isSpeaking) return;
+    const clean = (text || '')
+      .replace(/\*\*(.*?)\*\*/g, '$1')          // bold → plain
+      .replace(/^#{1,3}\s+/gm, '')              // headers
+      .replace(/^\s*[-•]\s+/gm, '')             // bullets
+      .replace(/\[Moderator\]/g, 'Moderator note:')
+      .replace(/Awaiting your next step\./gi, '')
+      .trim();
+    if (!clean) return;
+    const utterance = new SpeechSynthesisUtterance(clean);
+    utterance.rate = 1.0;
+    utterance.pitch = 1.0;
+    window.speechSynthesis.speak(utterance);
   };
 
   // Detect variations of the user indicating they are ready
@@ -135,6 +155,7 @@ export default function App() {
             rubricTotalScore: data.data.rubricTotalScore,
             rubricMaxScore: data.data.rubricMaxScore,
             rubricPass: data.data.rubricPass,
+            checkboxItems: data.data.checkboxItems || null,
             scenarioInfo: {
               mainScenario: scenarioData?.mainScenario || 'Unknown',
               subScenario: scenarioData?.subScenario || 'Unknown'
@@ -184,35 +205,10 @@ export default function App() {
     return () => clearInterval(timer);
   }, [isTimerRunning, timeLeft]);
 
-  // Sync timer with backend-provided time limit when available (ONLY ONCE when scenario starts)
+  // Timer is currently disabled — uncomment the body below to re-enable
+  // eslint-disable-next-line no-unused-vars
   useEffect(() => {
-    const minutes = scenarioData?.meta?.timeLimitMinutes;
-    const startTime = scenarioData?.meta?.startTime;
-
-    if (!minutes || !Number.isFinite(minutes) || isTimerRunning) return;
-
-    if (startTime) {
-      // Backend set start time (normal path)
-      const now = Date.now();
-      const elapsedMs = now - startTime;
-      const elapsedSeconds = Math.floor(elapsedMs / 1000);
-      const totalSeconds = minutes * 60;
-      const remainingSeconds = Math.max(0, totalSeconds - elapsedSeconds);
-      setTimeLeft(remainingSeconds);
-      setIsTimerRunning(true);
-      return;
-    }
-
-    // Fallback for deployed frontend (e.g. GitHub Pages): if we see the scene-start message
-    // but never got meta.startTime (e.g. session on different backend instance), start timer now
-    const hasSceneStarted = messages.some(
-      (m) => m.sender === 'ai' && typeof m.text === 'string' && m.text.includes('You arrive at')
-    );
-    if (hasSceneStarted) {
-      const totalSeconds = minutes * 60;
-      setTimeLeft(totalSeconds);
-      setIsTimerRunning(true);
-    }
+    // TIMER DISABLED
   }, [scenarioData, isTimerRunning, messages]);
 
   // Auto-scroll to latest message on updates
@@ -269,6 +265,7 @@ export default function App() {
         // Add AI response to messages (formatted for readability)
         const formattedResponse = formatAssistantText(data.data.response);
         setMessages(prev => [...prev, { sender: 'ai', text: formattedResponse }]);
+        speakText(data.data.response);
       } else {
         // Handle API error
         setMessages(prev => [...prev, {
@@ -341,11 +338,15 @@ export default function App() {
       if (audioContextRef.current) {
         try { audioContextRef.current.close(); } catch (_) { }
       }
+      if (window.speechSynthesis) window.speechSynthesis.cancel();
     };
   }, []);
 
   const startListening = async () => {
     try {
+      // Stop any ongoing TTS so mic and speaker don't overlap
+      if (window.speechSynthesis) window.speechSynthesis.cancel();
+
       // Tear down any prior session
       if (recognitionRef.current) {
         try { recognitionRef.current.onend = null; recognitionRef.current.onerror = null; } catch (_) { }
@@ -721,6 +722,44 @@ export default function App() {
                 overflowY: 'auto',
               }}
             />
+            {/* Speaker/mute toggle button */}
+            <button
+              onClick={() => {
+                if (isSpeaking) window.speechSynthesis && window.speechSynthesis.cancel();
+                setIsSpeaking(prev => !prev);
+              }}
+              title={isSpeaking ? 'Mute voice' : 'Unmute voice'}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: isSpeaking ? '#E60000' : '#9CA3AF',
+                cursor: 'pointer',
+                padding: '8px',
+                outline: 'none',
+                borderRadius: '50%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.2s ease',
+                marginRight: '2px',
+                flexShrink: 0,
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#f0f0f0'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+            >
+              {isSpeaking ? (
+                /* Speaker on icon */
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z" fill="currentColor"/>
+                  <path d="M14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" fill="currentColor"/>
+                </svg>
+              ) : (
+                /* Speaker muted icon */
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z" fill="currentColor"/>
+                </svg>
+              )}
+            </button>
             {/* Voice input button */}
             <button
               onClick={isListening ? stopListening : startListening}

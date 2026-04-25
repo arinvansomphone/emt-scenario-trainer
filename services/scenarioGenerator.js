@@ -361,15 +361,14 @@ Generate the complete scenario now as JSON only.`;
     const instructions = {
       novice: `
 - Create a STABLE patient who responds well to treatment
-- Use CLEAR, obvious signs and symptoms
+- Patient has EXACTLY ONE condition or injury — NO comorbidities, NO secondary complaints, NO complicating factors
+- Use CLEAR, obvious signs and symptoms for that single condition
 - Patient should be COOPERATIVE and communicative
 - Vitals should improve quickly with appropriate interventions
 - Make the diagnosis straightforward for students
 - Include encouraging patient responses to build confidence
 - Avoid complications or rapid deterioration
-- Patient should give clear, helpful answers to assessment questions
-- IMPORTANT: Add at least one UNIQUE or INTERESTING element to make this scenario memorable
-- Consider including a minor complication that's easy to manage but adds realism`,
+- Patient should give clear, helpful answers to assessment questions`,
 
       intermediate: `
 - Create a MODERATELY DISTRESSED patient with some challenges

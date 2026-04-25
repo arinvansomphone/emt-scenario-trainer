@@ -3,14 +3,28 @@ const TextNormalizer = require('../utils/textNormalizer');
 class VitalsProcessor {
   detectVitalsRequest(message) {
     const normalizedMessage = TextNormalizer.normalizeToAsciiLower(message);
-    
-    // Check for specific vitals mentioned
+
+    // Qualitative skin temp check (no thermometer) — suppress numeric temperature vital
+    const isSkinTempQualitative = !/(thermometer|temp(erature)?\s*reading|take.*temp)/.test(normalizedMessage) && (
+      /(skin|forehead|wrist|hand|arm).*(temp(erature)?|warm|cool|hot|cold)/.test(normalizedMessage) ||
+      /(temp(erature)?|warm|cool|hot|cold).*(skin|forehead|wrist|hand|arm)/.test(normalizedMessage) ||
+      /feel.*(forehead|skin)/.test(normalizedMessage)
+    );
+
+    // Detect when the user is REPORTING a known value to the patient rather than REQUESTING a reading.
+    // e.g. "your oxygen sat is 94%, we're going to give you oxygen" — not a vitals check request.
+    const isReportingValue = /(is|was|reads?|shows?|came? back|result)\s+\d+/.test(normalizedMessage) ||
+      /\d+\s*%\s*(which|so|that)/.test(normalizedMessage) ||
+      /your (heart rate|pulse|bp|blood pressure|oxygen|sat|spo2|o2|temp|temperature) is \d+/.test(normalizedMessage);
+
+    // Check for specific vitals mentioned — suppress if the user is just informing the patient
     const specificVitals = {
-      isPulseOx: /(pulse ox|oxygen saturation|saturation|spo2|sp02|finger probe|pulse oximeter|oximeter)/.test(normalizedMessage),
-      isHeartRate: /(heart rate|pulse|hr)\b/.test(normalizedMessage),
-      isRespRate: /(respiratory rate|breathing rate|rr)\b/.test(normalizedMessage),
-      isBloodPressure: /(blood pressure|bp)\b/.test(normalizedMessage),
-      isTemperature: /(temp|temperature)\b/.test(normalizedMessage)
+      isPulseOx: !isReportingValue && /(pulse ox|oxygen saturation|saturation|spo2|sp02|finger probe|pulse oximeter|oximeter)/.test(normalizedMessage),
+      isHeartRate: !isReportingValue && /(heart rate|pulse|hr)\b/.test(normalizedMessage),
+      isRespRate: !isReportingValue && /(respiratory rate|respiration rate|breathing rate|rr)\b/.test(normalizedMessage),
+      isBloodPressure: !isReportingValue && /(blood pressure|bp)\b/.test(normalizedMessage),
+      isTemperature: !isSkinTempQualitative && !isReportingValue && /(temp|temperature)\b/.test(normalizedMessage),
+      isBloodGlucose: !isReportingValue && /(blood glucose|blood sugar|bgl|glucometry|glucometer|glucose level|sugar level)/.test(normalizedMessage)
     };
     
     // Check if any specific vitals are mentioned
@@ -50,22 +64,24 @@ class VitalsProcessor {
   }
 
   formatVitalsResponse(parsedVitals, request) {
+    const [bpSystolic, bpDiastolic] = (parsedVitals.bp || '').split('/');
+
     if (request.isFullVitals) {
       return [
-        `HR: ${parsedVitals.hr}`,
-        `RR: ${parsedVitals.rr}`,
-        `BP: ${parsedVitals.bp}`,
-        `SpO2: ${parsedVitals.spo2}%`,
-        `Temp: ${parsedVitals.temp}°F`
+        `Heart rate is ${parsedVitals.hr} beats per minute.`,
+        `Respiratory rate is ${parsedVitals.rr} breaths per minute.`,
+        `Blood pressure is ${bpSystolic} over ${bpDiastolic}.`,
+        `Oxygen saturation is ${parsedVitals.spo2} percent.`,
+        `Temperature is ${parsedVitals.temp} degrees Fahrenheit.`
       ].join('\n');
     }
 
     const vitals = [];
-    if (request.isPulseOx) vitals.push(`SpO2: ${parsedVitals.spo2}%`);
-    if (request.isHeartRate) vitals.push(`HR: ${parsedVitals.hr}`);
-    if (request.isRespRate) vitals.push(`RR: ${parsedVitals.rr}`);
-    if (request.isBloodPressure) vitals.push(`BP: ${parsedVitals.bp}`);
-    if (request.isTemperature) vitals.push(`Temp: ${parsedVitals.temp}°F`);
+    if (request.isPulseOx) vitals.push(`Oxygen saturation is ${parsedVitals.spo2} percent.`);
+    if (request.isHeartRate) vitals.push(`Heart rate is ${parsedVitals.hr} beats per minute.`);
+    if (request.isRespRate) vitals.push(`Respiratory rate is ${parsedVitals.rr} breaths per minute.`);
+    if (request.isBloodPressure) vitals.push(`Blood pressure is ${bpSystolic} over ${bpDiastolic}.`);
+    if (request.isTemperature) vitals.push(`Temperature is ${parsedVitals.temp} degrees Fahrenheit.`);
     
     return vitals.join('\n');
   }

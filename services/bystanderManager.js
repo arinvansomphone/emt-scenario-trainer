@@ -252,14 +252,23 @@ class BystanderManager {
    * @returns {Object|null} - Responding bystander or null
    */
   selectRespondingBystander(normalizedMessage) {
-    // Questions that would prompt bystander responses
+    // Bystanders should only respond when the EMT is clearly addressing them
+    // (asking what happened, asking about the patient's history, or controlling the crowd).
+    // Triggers must be specific phrases — generic words like "patient", "take", or "start"
+    // appear in almost every EMT action message and would cause constant bystander chatter.
     const bystanderTriggers = [
-      /(what happened|tell me|witness|see|know)/,
-      /(name|who is|patient)/,
-      /(medication|pills|take|allerg)/,
-      /(history|condition|problem)/,
-      /(when|how long|start)/,
-      /(move back|step back|give.*space)/
+      // Witness / what happened questions directed at bystanders
+      /\b(what happened|did you see|did anyone see|tell me what|witness|saw what|see anything)\b/,
+      // Asking bystanders about the patient
+      /\b(do you know|does anyone know|any of you know|what'?s? (his|her|their|the patient'?s?) name|who is (he|she|the patient)|are you (a )?(family|friend|relative))\b/,
+      // Asking bystanders about meds / allergies / history
+      /\b(does (he|she|they|the patient) (take|have)|is (he|she|they) (on|allergic)|any (medications?|allergies|medical history|conditions?))\b/,
+      // Asking bystanders about timeline
+      /\b(when did (this|it|he|she|they)|how long (has|have|did)|when did (it|this) (start|begin|happen))\b/,
+      // Crowd control directed at bystanders
+      /\b(move back|step back|stand back|give .* (room|space)|clear (the )?area|please stay back|everyone (back|away))\b/,
+      // Direct address to bystanders
+      /\b(sir|ma'?am|excuse me|hey|you there).*\?|^(sir|ma'?am|excuse me)/
     ];
 
     const shouldRespond = bystanderTriggers.some(trigger => trigger.test(normalizedMessage));
@@ -305,32 +314,37 @@ class BystanderManager {
     const presentation = scenarioData?.generatedScenario?.presentation || {};
     
     // Handle crowd control requests
-    if (/(move back|step back|give.*space|crowd)/.test(normalizedMessage)) {
+    if (/\b(move back|step back|stand back|give .* (room|space)|clear (the )?area|please stay back|everyone (back|away)|crowd)\b/.test(normalizedMessage)) {
       return this.generateCrowdControlResponse(bystander);
     }
 
-    // Handle information requests
-    if (/(what happened|tell me|witness|see)/.test(normalizedMessage)) {
+    // Handle witness / what-happened questions
+    if (/\b(what happened|did you see|did anyone see|tell me what|witness|saw what|see anything)\b/.test(normalizedMessage)) {
       return this.generateWitnessResponse(bystander, scenarioData);
     }
 
-    if (/(name|who is)/.test(normalizedMessage)) {
+    // Asking about the patient's name / identity
+    if (/\b(what'?s? (his|her|their|the patient'?s?) name|who is (he|she|the patient)|do you know (his|her|their) name)\b/.test(normalizedMessage)) {
       return this.generateNameResponse(bystander, patientProfile);
     }
 
-    if (/(medication|pills|take)/.test(normalizedMessage)) {
+    // Asking about medications
+    if (/\b(any medications?|on (any )?(medications?|meds)|does (he|she|they|the patient) take|what (medications?|meds))\b/.test(normalizedMessage)) {
       return this.generateMedicationResponse(bystander, patientProfile);
     }
 
-    if (/(allerg)/.test(normalizedMessage)) {
+    // Asking about allergies
+    if (/\b(allerg)/.test(normalizedMessage)) {
       return this.generateAllergyResponse(bystander, patientProfile);
     }
 
-    if (/(history|condition|problem)/.test(normalizedMessage)) {
+    // Asking about medical history / conditions
+    if (/\b(medical history|past medical|any (medical )?conditions?|known (medical )?problems?)\b/.test(normalizedMessage)) {
       return this.generateHistoryResponse(bystander, patientProfile);
     }
 
-    if (/(when|how long|start)/.test(normalizedMessage)) {
+    // Asking about timeline
+    if (/\b(when did (this|it|he|she|they)|how long (has|have|did)|when did (it|this) (start|begin|happen))\b/.test(normalizedMessage)) {
       return this.generateTimelineResponse(bystander, presentation);
     }
 
@@ -552,43 +566,10 @@ class BystanderManager {
 
   /**
    * Generate bystander response to EMT action/question
-   * @param {string} userMessage - EMT message
-   * @param {Object} actionResult - Recognized action (optional)
-   * @returns {string|null} - Bystander response or null
+   * Alias for generateBystanderResponse for backwards compatibility.
    */
   generateResponse(userMessage, actionResult = null) {
-    if (this.currentBystanders.length === 0) {
-      return null;
-    }
-
-    const normalizedMessage = userMessage.toLowerCase();
-    const respondingBystander = this.selectRespondingBystander(normalizedMessage);
-    
-    if (!respondingBystander) {
-      return null;
-    }
-
-    // Generate appropriate response based on message content
-    let response = this.generateBystanderDialogue(respondingBystander, normalizedMessage);
-    
-    // Mark bystander as having spoken
-    respondingBystander.hasSpoken = true;
-    
-    console.log('👥 Bystander response generated:', { 
-      type: respondingBystander.type, 
-      response: response.substring(0, 50) + '...' 
-    });
-    
-    return response;
-  }
-
-  /**
-   * Reset bystander manager for new scenario
-   */
-  reset() {
-    this.currentBystanders = [];
-    this.scenarioLocation = null;
-    console.log('🔄 Bystander manager reset');
+    return this.generateBystanderResponse(userMessage, null);
   }
 
   /**

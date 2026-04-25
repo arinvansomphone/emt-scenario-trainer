@@ -381,18 +381,76 @@ class ChatService {
   // ---------- Detect and respond to pulse/skin quality checks ----------
   detectPulseSkinRequest(userText) {
     const t = TextNormalizer.normalizeToAsciiLower(userText || '');
-    
+
     // Detect pulse checks - includes checking hand/wrist and pulse quality mentions
-    const wantsPulse = /(check|assess|feel|palpate|grab).*(radial|wrist|pulse|hand)/.test(t) || 
+    const wantsPulse = /(check|assess|feel|palpate|grab).*(radial|wrist|pulse|hand)/.test(t) ||
                        /(pulse).*(quality|rate|regular|strong)/.test(t);
-    
-    // Detect skin checks - includes checking hand for skin condition
-    const wantsSkin = /(check|assess|look at|inspect|feel).*(skin)/.test(t) || 
+
+    // Detect skin checks - checking skin condition, color, or CRT
+    const wantsSkin = /(check|assess|look at|inspect|feel).*(skin)/.test(t) ||
                       /(cap(illary)?\s*refill|crt)/.test(t) ||
                       /(feel|check).*(hand).*(skin|quality)/.test(t);
-    
+
+    // Detect qualitative skin temperature without a thermometer
+    // e.g. "check skin temperature", "feel their forehead", "check wrist for skin temperature"
+    const wantsSkinTemp = !/(thermometer|temp(erature)?\s*reading|take.*temp)/.test(t) && (
+      /(skin|forehead|wrist|hand|arm).*(temp(erature)?|warm|cool|hot|cold)/.test(t) ||
+      /(temp(erature)?|warm|cool|hot|cold).*(skin|forehead|wrist|hand|arm)/.test(t) ||
+      /feel.*(forehead|skin)/.test(t)
+    );
+
+    // Detect breathing quality checks (without RR request)
+    // e.g. "quality of breathing", "how's her breathing", "assess breathing quality"
+    const wantsBreathingQuality = /(quality\s+of\s+breathing|breathing\s+quality|how.*(breath|breathing)|assess.*breath|breath.*effort|work\s+of\s+breathing|breathing\s+effort)/.test(t) ||
+      (/breath/.test(t) && /quality|effort|work|how|what/.test(t));
+
     const wantsAck = /(do\s+you\s+mind|is\s+it\s+(ok|okay|alright)|can\s+i|may\s+i|okay\s+if|ok\s+if|alright\s+if)/.test(t) || /\?\s*$/.test(t);
-    return { wantsPulse, wantsSkin, wantsAck, any: wantsPulse || wantsSkin };
+    return { wantsPulse, wantsSkin, wantsSkinTemp, wantsBreathingQuality, wantsAck, any: wantsPulse || wantsSkin || wantsSkinTemp || wantsBreathingQuality };
+  }
+
+  /**
+   * Return a qualitative breathing description based on scenario type.
+   */
+  getBreathingQuality(scenarioData) {
+    const subScenario = (scenarioData?.subScenario || '').toLowerCase();
+    const symptoms = (scenarioData?.dispatchInfo?.symptoms || scenarioData?.generatedScenario?.presentation?.chiefComplaint || '').toLowerCase();
+
+    if (/respiratory|asthma|breathing/.test(subScenario)) {
+      if (/asthma/.test(symptoms) || /asthma/.test(subScenario)) {
+        return 'labored with audible wheezing, accessory muscle use noted, speaking in short phrases';
+      }
+      return 'labored, increased work of breathing, accessory muscle use present';
+    }
+    if (/cardiac|chest pain|mi/.test(subScenario)) {
+      return 'slightly labored, shallow, patient appears anxious';
+    }
+    if (/mvc|trauma|fall|assault|gsw|stabbing|burn/.test(subScenario)) {
+      return 'guarded, shallow due to pain, splinting noted';
+    }
+    if (/neurolog|stroke|seizure/.test(subScenario)) {
+      return 'irregular rate and depth, may be agonal or snoring depending on consciousness';
+    }
+    if (/metabolic|diabetic|hypoglycemi/.test(subScenario)) {
+      return 'slightly rapid and deep (Kussmaul pattern), otherwise unlabored';
+    }
+    return 'unlabored, regular rate and depth, no accessory muscle use';
+  }
+
+  /**
+   * Return a qualitative skin temperature description based on scenario type.
+   * Used when EMT checks skin temp by touch (no thermometer).
+   */
+  getSkinTempQuality(scenarioData) {
+    const subScenario = (scenarioData?.subScenario || '').toLowerCase();
+    const symptoms = (scenarioData?.dispatchInfo?.symptoms || scenarioData?.generatedScenario?.presentation?.chiefComplaint || '').toLowerCase();
+
+    if (/fever|febrile|sepsis/.test(symptoms) || /environmental/.test(subScenario)) return 'hot and diaphoretic';
+    if (/cardiac|chest pain|mi/.test(subScenario) || /shock/.test(symptoms)) return 'cool and diaphoretic';
+    if (/mvc|trauma|fall|assault|gsw|stabbing|burn/.test(subScenario)) return 'cool and slightly diaphoretic';
+    if (/respiratory|asthma|breathing/.test(subScenario)) return 'warm and diaphoretic';
+    if (/metabolic|diabetic|hypoglycemi/.test(subScenario) || /sweat/.test(symptoms)) return 'cool and clammy';
+    if (/neurolog|stroke|seizure/.test(subScenario)) return 'warm and dry';
+    return 'warm and dry';
   }
 
   formatPulseSkinResponse(pulseSkinReq, scenarioData) {
@@ -401,7 +459,6 @@ class ChatService {
       lines.push(`"${this.generateSimpleAcknowledgment(scenarioData)}"`);
     }
     if (pulseSkinReq.wantsPulse) {
-      // Use patient simulator HR if available
       try {
         const hrLine = this.patientSimulator.getSpecificVital('heart rate');
         lines.push('Radial pulse: regular and strong.');
@@ -411,11 +468,19 @@ class ChatService {
       }
     }
 
-    if (pulseSkinReq.wantsSkin) {
+    if (pulseSkinReq.wantsSkinTemp) {
+      const tempQuality = this.getSkinTempQuality(scenarioData);
+      lines.push(`Skin temperature: ${tempQuality}.`);
+    } else if (pulseSkinReq.wantsSkin) {
       const symptoms = (scenarioData?.dispatchInfo?.symptoms || scenarioData?.generatedScenario?.presentation?.chiefComplaint || '').toLowerCase();
       const hasFever = /fever|febrile|hot/.test(symptoms);
       const skinDesc = hasFever ? 'warm and slightly diaphoretic' : 'warm and dry';
       lines.push(`Skin: ${skinDesc}. Capillary refill brisk (<2 seconds).`);
+    }
+
+    if (pulseSkinReq.wantsBreathingQuality) {
+      const breathQuality = this.getBreathingQuality(scenarioData);
+      lines.push(`Breathing: ${breathQuality}.`);
     }
 
     return lines.join('\n');
@@ -592,7 +657,7 @@ class ChatService {
     else if (/metabolic|endocrine/.test(scenarioType)) category = 'metabolic';
     
     // Generate appropriate vital signs based on category and difficulty
-    const difficultyLevel = scenarioData?.generatedScenario?.difficulty?.level || 'intermediate';
+    const difficultyLevel = scenarioData?.generatedScenario?.difficulty?.level || 'novice';
     
     // Base vital signs by category
     let vitals = this.getBaseVitalsByCategory(category);
@@ -862,7 +927,7 @@ class ChatService {
   // ---------- Helper method to add difficulty context ----------
   addDifficultyContext(userMessage, conversation, scenarioData) {
     // Get difficulty level from scenario data
-    const difficultyLevel = scenarioData?.generatedScenario?.difficulty?.level || 'intermediate';
+    const difficultyLevel = scenarioData?.generatedScenario?.difficulty?.level || 'novice';
     
     // Add difficulty-specific context
     let difficultyContext = '';
@@ -909,20 +974,14 @@ class ChatService {
     if (!this.currentScenarioActive && 
         scenarioData?.generatedScenario && 
         scenarioData?.meta?.startTime) {
-      const elapsedMs = Date.now() - scenarioData.meta.startTime;
-      const timeLimitMs = (scenarioData.meta.timeLimitMinutes || 20) * 60 * 1000;
-      
-      if (elapsedMs < timeLimitMs) {
-        console.log('🔄 Auto-activating scenario (frontend started but backend was inactive)');
-        this.currentScenarioActive = true;
-        this.scenarioStartTime = scenarioData.meta.startTime;
-        this.patientSimulator.initializePatient(scenarioData);
-        this.bystanderManager.generateBystanders(scenarioData);
-        this.environmentalManager.generateEnvironmentalFactors(scenarioData);
-        this.performanceEvaluator.startEvaluation(scenarioData, this.scenarioStartTime);
-      } else {
-        console.log('⏱️ Scenario has expired, not activating');
-      }
+      // Time limit disabled — always auto-activate regardless of elapsed time
+      console.log('🔄 Auto-activating scenario (frontend started but backend was inactive)');
+      this.currentScenarioActive = true;
+      this.scenarioStartTime = scenarioData.meta.startTime;
+      this.patientSimulator.initializePatient(scenarioData);
+      this.bystanderManager.generateBystanders(scenarioData);
+      this.environmentalManager.generateEnvironmentalFactors(scenarioData);
+      this.performanceEvaluator.startEvaluation(scenarioData, this.scenarioStartTime);
     }
 
     // Feedback mode removed
@@ -989,11 +1048,13 @@ class ChatService {
         console.log('⚠️ Template approach failed after retries, using fallback dispatch');
         const fallbackData = this.templateGenerator.generateFallbackDispatch(scenarioData.subScenario);
         scenarioData.dispatchInfo = fallbackData;
+        const fallbackName = this.templateGenerator.generatePatientName(fallbackData.gender, fallbackData.age);
         scenarioData.generatedScenario = {
           dispatchInfo: fallbackData,
           patientProfile: {
             age: fallbackData.age,
             gender: fallbackData.gender,
+            name: fallbackName,
             medicalHistory: ['Unknown'],
             medications: ['None known'],
             allergies: ['NKDA']
@@ -1102,6 +1163,36 @@ class ChatService {
 
     // Recognize and process user actions
     if (this.currentScenarioActive) {
+      // Airway/mouth check: intercept before conversation handler so patient opens
+      // mouth and EMT receives an objective airway finding.
+      const mouthCheckPattern = /\b(open|show me|look in|look at|check|inspect)\s+(your\s+)?(mouth|airway)\b|\bcan you open your mouth\b/i;
+      if (mouthCheckPattern.test(userMessage)) {
+        console.log('👄 Mouth/airway check detected');
+        const airwayFinding = this.generateAirwayFinding(scenarioData);
+        const prevConv = Array.isArray(conversation) ? conversation : [];
+        const updatedConversation = [
+          ...prevConv,
+          { role: 'user', content: userMessage },
+          { role: 'assistant', content: airwayFinding }
+        ];
+        return { response: airwayFinding, conversation: updatedConversation, additionalMessages: [], enhancedScenarioData: scenarioData };
+      }
+
+      // Pulse / skin / breathing quality quick response — runs before conversation
+      // handler so qualitative assessment messages aren't misrouted as patient chat.
+      const pulseSkinReqEarly = this.detectPulseSkinRequest(userMessage);
+      if (pulseSkinReqEarly.any) {
+        const findings = this.formatPulseSkinResponse(pulseSkinReqEarly, scenarioData);
+        const response = `${findings}\n\nAwaiting your next step.`;
+        const prevConversation = Array.isArray(conversation) ? conversation : [];
+        const updatedConversation = [
+          ...prevConversation,
+          { role: 'user', content: userMessage },
+          { role: 'assistant', content: response }
+        ];
+        return { response, conversation: updatedConversation, additionalMessages: [], enhancedScenarioData: scenarioData };
+      }
+
       // Early conversation handling: if the user is introducing themselves or
       // engaging in simple conversation, force a patient reply BEFORE any
       // action recognition to avoid unnecessary clarification prompts.
@@ -1128,18 +1219,25 @@ class ChatService {
         return { response: sanitized, conversation: updatedConversation, additionalMessages: [], enhancedScenarioData: scenarioData };
       }
 
+      // Check for stroke / neurological assessment (FAST, Cincinnati, CPSS)
+      const strokePattern = /\b(stroke\s+assessment|fast\s+assessment|fast\s+test|cincinnati|cpss|facial\s+droop|arm\s+drift|speech\s+test|neuro(logical)?\s+assessment|assess.*stroke|stroke.*scale)\b/i;
+      if (strokePattern.test(userMessage)) {
+        console.log('🧠 Stroke assessment detected');
+        const findings = this.generateStrokeAssessmentFindings(scenarioData);
+        const prevConv = Array.isArray(conversation) ? conversation : [];
+        const updatedConversation = [
+          ...prevConv,
+          { role: 'user', content: userMessage },
+          { role: 'assistant', content: findings }
+        ];
+        return { response: findings, conversation: updatedConversation, additionalMessages: [], enhancedScenarioData: scenarioData };
+      }
+
       // Check for physical exam assessment intent
       const examIntent = this.examAssessmentManager.detectExamIntent(userMessage);
       if (examIntent.detected) {
         console.log('📋 Physical exam assessment detected:', examIntent);
         return await this.handleExamAssessment(userMessage, conversation, scenarioData, examIntent);
-      }
-
-      // Check for ongoing exam assessment responses
-      const sessionId = this.generateSessionId(conversation);
-      if (this.examAssessmentManager.hasActiveAssessment(sessionId)) {
-        console.log('📝 Processing exam assessment answer');
-        return await this.handleExamAssessmentAnswer(userMessage, conversation, scenarioData, sessionId);
       }
 
       // Check for equipment placement FIRST (before action recognition processing)
@@ -1157,7 +1255,7 @@ class ChatService {
         } else {
           // For other equipment, include patient response
           const patientResponse = this.patientSimulator.generatePatientResponse(userMessage, scenarioData);
-          response = patientResponse;
+          response = patientResponse || '';
           
           // Automatically provide readings for monitoring equipment
           if (equipmentPlacement.providesReading) {
@@ -1199,6 +1297,7 @@ class ChatService {
       // Handle supportive care actions (emesis bag, blanket, water, etc.)
       if (recognizedAction.type === 'supportiveCare') {
         console.log('🤲 Supportive care action recognized:', recognizedAction.details);
+        this.performanceEvaluator.logAction(userMessage, Date.now(), recognizedAction.details);
         const supportiveAck = await this.generateSupportiveCareAcknowledgment(recognizedAction.details, scenarioData);
         return {
           response: supportiveAck,
@@ -1220,6 +1319,28 @@ class ChatService {
         };
       }
       
+      // Handle OB delivery assistance
+      if (recognizedAction.type === 'obDelivery') {
+        console.log('👶 OB delivery action recognized:', recognizedAction.details);
+        const deliveryResponse = this.generateOBDeliveryResponse(recognizedAction.details, scenarioData);
+        return {
+          response: `${deliveryResponse}\n\nAwaiting your next step.`,
+          additionalMessages: [],
+          enhancedScenarioData: scenarioData
+        };
+      }
+
+      // Handle OB perineal exam (crowning check)
+      if (recognizedAction.type === 'obExam') {
+        console.log('🤰 OB perineal exam recognized');
+        const obFinding = this.generateOBExamFinding(scenarioData);
+        return {
+          response: `${obFinding}\n\nAwaiting your next step.`,
+          additionalMessages: [],
+          enhancedScenarioData: scenarioData
+        };
+      }
+
       // Check for contraindications
       if (recognizedAction.type === 'medicationAdmin') {
         const validation = this.actionRecognizer.validateMedicationAdmin(
@@ -1257,7 +1378,7 @@ class ChatService {
     if (this.currentScenarioActive) {
       const vitalsRequest = this.vitalsProcessor.detectVitalsRequest(userMessage);
       if (vitalsRequest.isHeartRate || vitalsRequest.isBloodPressure || vitalsRequest.isRespRate || 
-          vitalsRequest.isTemperature || vitalsRequest.isPulseOx) {
+          vitalsRequest.isTemperature || vitalsRequest.isPulseOx || vitalsRequest.isBloodGlucose) {
         
         // Collect all requested vitals
         const requestedVitals = [];
@@ -1266,6 +1387,7 @@ class ChatService {
         if (vitalsRequest.isRespRate) requestedVitals.push('respiratory rate');
         if (vitalsRequest.isTemperature) requestedVitals.push('temperature');
         if (vitalsRequest.isPulseOx) requestedVitals.push('oxygen saturation');
+        if (vitalsRequest.isBloodGlucose) requestedVitals.push('blood glucose');
         
         // Get all requested vitals
         const vitalResponses = requestedVitals.map(vitalType => 
@@ -1273,9 +1395,10 @@ class ChatService {
         );
         
         const patientResponse = this.patientSimulator.generatePatientResponse(userMessage, scenarioData);
-        
+        const patientLine = patientResponse ? `${patientResponse}\n\n` : '';
+
         return {
-          response: `${patientResponse}\n\n${vitalResponses.join('\n')}\n\nAwaiting your next step.`,
+          response: `${patientLine}${vitalResponses.join('\n')}\n\nAwaiting your next step.`,
           additionalMessages: [],
           enhancedScenarioData: scenarioData
         };
@@ -1388,8 +1511,8 @@ class ChatService {
       }
       
       // Update patient state
-      this.patientSimulator.updateVitals();
-      this.patientSimulator.updateConsciousness();
+      this.patientSimulator.updateVitalsForTimeProgression(scenarioData);
+      this.patientSimulator.updateConsciousness(scenarioData);
       
       // Generate bystander interactions
       const bystanderResponse = this.bystanderManager.generateResponse(userMessage, null);
@@ -1406,20 +1529,6 @@ class ChatService {
           `${additionalContext}\n\nENVIRONMENT: ${environmentalFactor}` : 
           `ENVIRONMENT: ${environmentalFactor}`;
       }
-    }
-
-    // Pulse/Skin quality quick response (priority over region checks)
-    const pulseSkinReq = this.detectPulseSkinRequest(userMessage);
-    if (pulseSkinReq.any) {
-      const findings = this.formatPulseSkinResponse(pulseSkinReq, scenarioData);
-      const response = `${findings}\n\nAwaiting your next step.`;
-      const prevConversation = Array.isArray(conversation) ? conversation : [];
-      const updatedConversation = [
-        ...prevConversation,
-        { role: 'user', content: userMessage },
-        { role: 'assistant', content: response }
-      ];
-      return { response, conversation: updatedConversation, additionalMessages: [], enhancedScenarioData: scenarioData };
     }
 
     // Immediate region findings when user checks/assesses body parts
@@ -1443,8 +1552,11 @@ class ChatService {
     // Post-process the response
     let sanitized = PostProcessor.postProcessObjectiveContent(response, userMessage, scenarioData);
 
-    // Check if this is the first message in a scenario (no previous conversation)
-    if (!conversation || conversation.length === 0) {
+    // Check if this is the first message in a scenario (no previous conversation).
+    // Only enforce the initial dispatch if the scenario has NOT already been started —
+    // otherwise an empty-conversation request (e.g. lost frontend state) would clobber
+    // the real response with another dispatch.
+    if ((!conversation || conversation.length === 0) && !this.currentScenarioActive) {
       sanitized = await PostProcessor.enforceInitialDispatchMessage(sanitized, scenarioData);
     }
 
@@ -1592,13 +1704,16 @@ PATIENT BEHAVIOR BY CONDITION:
 20. Neurologic issues: Show confusion, delayed responses ("I... what?", "Okay, I think", uncertain responses)
 21. Trauma cases: Be protective of injuries, guarded ("Yeah, but be careful", "Okay, but it hurts")
 
+CRITICAL - DO NOT IMPROVISE SYMPTOMS:
+22. ONLY report symptoms, complaints, and conditions that are explicitly listed in the DETAILED PATIENT INFORMATION section below. Do NOT invent new symptoms, new injuries, new dizziness, new pain locations, new complaints, or any physical findings that are not already part of your scenario profile. If you are an alert patient, do NOT spontaneously describe confusion, dizziness, or altered mental status unless those are listed as your chief complaint or physical findings.
+
 PATIENT BEHAVIOR BY CONSCIOUSNESS:
 22. Alert: Respond clearly and promptly ("Absolutely", "Of course", attentive nods)
 23. Confused: Respond uncertainly, ask questions ("I'm... confused", "What's happening?")
 24. Unresponsive: No verbal responses, only describe physical observations
 
 DIFFICULTY-BASED BEHAVIOR:
-25. NOVICE (Training Mode): Be cooperative and helpful. Give clear, complete answers. Show appreciation for EMT care. Respond positively to interventions and feel better when treated appropriately. Be reassuring to build student confidence. Vital signs remain stable, symptoms are clear and consistent. Show rapid improvement with any appropriate intervention.
+25. NOVICE (Training Mode): Be cooperative and helpful. Give clear, complete answers. Show appreciation for EMT care. Respond positively to interventions and feel better when treated appropriately. Be reassuring to build student confidence. Vital signs remain stable, symptoms are clear and consistent — you have ONE single condition with no secondary complaints or comorbidities. Show rapid improvement with any appropriate intervention.
 
 26. INTERMEDIATE (Realistic Mode): Be moderately cooperative but show some anxiety. Give answers but may need prompting for details. Show realistic concern about your condition. Respond to interventions with gradual improvement. Be patient but occasionally ask questions. Vital signs may fluctuate, symptoms may vary slightly. Show moderate improvement with appropriate interventions.
 
@@ -1716,6 +1831,7 @@ Patient ID: ${scenarioData.sunetId || 'Unknown'}`;
         systemMessage += `
 
 DETAILED PATIENT INFORMATION:
+- Name: ${pp.name || 'Unknown'}
 - Age: ${pp.age || 'Unknown'} years old
 - Gender: ${pp.gender || 'Unknown'}
 - Medical History: ${medicalHistoryStr}
@@ -1725,7 +1841,20 @@ DETAILED PATIENT INFORMATION:
 - Symptom Onset: ${gs.presentation?.onsetTime || 'Unknown'}
 - Current Condition: ${gs.physicalFindings?.consciousness || 'Alert'}
 
-You are this specific patient. Respond consistently with this medical profile and current condition.`;
+You are this specific patient named ${pp.name || 'Unknown'}. When asked your name, give this name. Respond consistently with this medical profile and current condition.
+
+CRITICAL - CONSISTENCY RULES (never violate these):
+1. Your medications are EXACTLY: ${medicationsStr}. Never say anything different. If the EMT asks about medications — directly, as a follow-up, or to confirm — always give this same answer. Do NOT say "I don't take anything" if you have medications listed, and do NOT say you take medications if the list is "none".
+2. Your medical history is EXACTLY: ${medicalHistoryStr}. Always give this same answer. Do NOT invent conditions or deny conditions that are listed.
+3. Your allergies are EXACTLY: ${allergiesStr}. Always give this same answer.
+4. NEVER contradict yourself across messages. If you said something in a prior message, stay consistent with it.
+5. ALWAYS answer the EMT's follow-up questions in context. NEVER respond with "I'm not sure what you mean", "Can you clarify?", "I don't understand", or similar confusion phrases when the EMT is asking you to elaborate on something YOU just said. Examples:
+   - If you said "my pain radiates to my shoulder" and the EMT asks "which shoulder?" → answer with a specific side (e.g. "my left shoulder")
+   - If you said "I have some medical issues" and the EMT asks "like what?" → list your actual conditions
+   - If you said "it hurts here" and the EMT asks "where exactly?" → describe the location specifically
+   - If you said "for a while now" and the EMT asks "how long?" → give a specific duration
+6. When you describe a symptom (pain location, sensation, timing), be specific the FIRST time when possible. If you weren't specific, commit to a specific answer when asked a follow-up — pick one and stay consistent.
+7. Do NOT improvise or invent details about your medical history, medications, or allergies that are not in your profile above. But you CAN provide reasonable specifics for symptoms (which side, how long, what it feels like) — once you commit to a detail, stay consistent with it for the rest of the scenario.`;
       }
 
       systemMessage += `\n\nRespond as the patient in this scenario.`;
@@ -2024,15 +2153,22 @@ Format your response as valid JSON only, with exactly these keys: assessment (st
     );
     
     // Generate moderator confirmation
+    const itemLabel = careItem.charAt(0).toUpperCase() + careItem.slice(1);
     let moderatorConfirmation = '';
-    if (careAction === 'providing' || careAction === 'getting') {
-      moderatorConfirmation = `${careItem.charAt(0).toUpperCase() + careItem.slice(1)} provided to patient.`;
-    } else if (careAction === 'placing') {
-      moderatorConfirmation = `${careItem.charAt(0).toUpperCase() + careItem.slice(1)} placed nearby.`;
+    if (careAction === 'placing') {
+      const onPatientItems = ['blanket', 'towel', 'pillow', 'ice pack', 'cold pack', 'cool pack'];
+      if (onPatientItems.includes(careItem)) {
+        moderatorConfirmation = `[Moderator] ${itemLabel} placed on patient.`;
+      } else {
+        moderatorConfirmation = `[Moderator] ${itemLabel} placed nearby.`;
+      }
+    } else {
+      moderatorConfirmation = `[Moderator] ${itemLabel} provided to patient.`;
     }
     
     // Combine patient response and moderator confirmation
-    return `${patientResponse}\n\n${moderatorConfirmation}\n\nAwaiting your next step.`;
+    const patientLine = patientResponse ? `${patientResponse}\n\n` : '';
+    return `${patientLine}${moderatorConfirmation}\n\nAwaiting your next step.`;
   }
 
   async generateOxygenAdminAcknowledgment(actionDetails, scenarioData) {
@@ -2044,6 +2180,65 @@ Format your response as valid JSON only, with exactly these keys: assessment (st
     
     // Return only moderator confirmation
     return `${moderatorConfirmation}\n\nAwaiting your next step.`;
+  }
+
+  generateOBDeliveryResponse(actionDetails, scenarioData) {
+    const step = actionDetails.deliveryStep || 'general_delivery';
+    const patientName = scenarioData?.generatedScenario?.patientProfile?.name || 'the patient';
+
+    switch (step) {
+      case 'active_labor_support':
+      case 'general_delivery':
+        return `You position yourself to assist with the delivery. ${patientName} is coached through her contractions. With each push, more of the baby's head becomes visible. You support the perineum and guide the head gently as it crowns. The baby's head delivers successfully. You check for a nuchal cord — none present. With the next contraction the shoulders deliver, followed by the body. A baby girl is delivered.`;
+
+      case 'delivery':
+        return `You support the baby's head as it delivers, guiding it downward gently to allow the anterior shoulder to emerge, then upward for the posterior shoulder. The baby is delivered and you receive her in both hands.`;
+
+      case 'cord_management':
+        return `You clamp the umbilical cord in two places approximately 8–10 cm from the baby's abdomen and cut between the clamps. The cord is severed successfully.`;
+
+      case 'newborn_wrap':
+        return `You wrap the newborn snugly in a clean blanket to preserve body heat. She is warm and secure.`;
+
+      case 'newborn_handoff':
+        return `You carefully pass the wrapped newborn to the mother. She holds her baby for the first time. Both mother and baby are stable.`;
+
+      case 'newborn_cleaning':
+        return `You gently wipe the fluid and secretions from the baby's mouth, nose, and face with a clean towel. The airway is clear of visible debris.`;
+
+      case 'newborn_suction':
+        return `You suction the newborn's mouth first, then the nose with a bulb syringe. A small amount of fluid is cleared. The airway appears patent.`;
+
+      case 'newborn_care':
+        return `You dry the newborn vigorously with a clean towel, stimulating her as you do so. She is wrapped to maintain warmth. She begins to cry — a strong, healthy cry.`;
+
+      case 'newborn_assessment':
+        return `Newborn assessment: She is crying vigorously. Skin color is pink centrally with slight acrocyanosis of the extremities. Muscle tone is good. Heart rate is greater than 100 beats per minute. Respiratory effort is strong. APGAR score is approximately 8 at one minute.`;
+
+      default:
+        return `You assist ${patientName} through the delivery. The procedure proceeds as expected.`;
+    }
+  }
+
+  generateOBExamFinding(scenarioData) {
+    const subScenario = (scenarioData?.subScenario || '').toLowerCase();
+    const chiefComplaint = (scenarioData?.generatedScenario?.presentation?.chiefComplaint || '').toLowerCase();
+    const isOB = /ob|gyn|obstetric|labor|deliver|pregnant|birth|contraction/.test(subScenario + ' ' + chiefComplaint);
+
+    if (!isOB) {
+      return 'Perineal area inspected. No crowning or abnormal findings noted. This does not appear to be an obstetric emergency.';
+    }
+
+    const onset = scenarioData?.generatedScenario?.presentation?.onsetTime || 'several minutes';
+    const contractionFrequency = /advanced|severe/.test(scenarioData?.generatedScenario?.difficulty?.level || '')
+      ? 'every 1 to 2 minutes'
+      : 'every 3 to 5 minutes';
+
+    const crowningSeverity = /advanced/.test(scenarioData?.generatedScenario?.difficulty?.level || '')
+      ? 'The baby\'s head is crowning with significant presenting visible. Delivery is imminent. Prepare for field delivery.'
+      : 'The baby\'s head is crowning. Delivery is imminent.';
+
+    return `Perineal area exposed and inspected. ${crowningSeverity} Contractions are occurring ${contractionFrequency}. The patient is in active labor.`;
   }
 
   // ---------- HYBRID CONVERSATION DETECTION SYSTEM ----------
@@ -2058,6 +2253,7 @@ Format your response as valid JSON only, with exactly these keys: assessment (st
     const strongActionPatterns = [
       /\b(place|apply|attach|insert|start|administer|give)\s+(iv|intravenous|medication|drug|oxygen|nasal cannula|non-rebreather)/,
       /\b(check|take|get|obtain|measure)\s+(vitals|blood pressure|bp|heart rate|pulse|temperature|respiratory rate)/,
+      /\bwhat\s+(is|are)\s+(her|his|their|the\s+patient'?s?)?\s*(heart rate|hr|blood pressure|bp|respiratory rate|rr|oxygen|spo2|sp02|temperature|temp|blood glucose|bgl|pulse|vitals)/,
       /\b(listen|auscultate)\s+(to\s+)?(lungs|heart|chest|breathing|breath sounds)/,
       /\bpalpate\s+(abdomen|chest|pulse|radial|carotid)/,
       /\b(start|initiate|establish)\s+(an\s+)?iv\b/,
@@ -2065,6 +2261,15 @@ Format your response as valid JSON only, with exactly these keys: assessment (st
       /\bimmobilize\s+(c-spine|cervical|spine|neck|extremity)/,
       /\b(apply|place)\s+(tourniquet|splint|dressing|bandage|collar)/,
       /\b(transport|move)\s+to\s+(hospital|ambulance|stretcher)/,
+      /\brapid\s+(trauma\s+)?(physical|exam|assessment)/,
+      /\b(perform|do|conduct|run)\s+(a\s+)?rapid\s+(trauma\s+)?(physical|exam|assessment)/,
+      /\b(perform|do|conduct|run)\s+(a\s+)?(full\s+)?focused\s+(physical|exam|assessment)/,
+      /\b(perform|do|conduct|run)\s+(a\s+)?(full\s+)?secondary\s+(physical|exam|assessment)/,
+      /\b(perform|do|conduct|run)\s+(a\s+)?(full|complete|whole|entire)\s+(body\s+)?(physical|exam|assessment)/,
+      /\b(perform|do|conduct|run)\s+(a\s+)?head[\s-]to[\s-]toe/,
+      /\bhead[\s-]to[\s-]toe(\s+(physical|exam|assessment|survey))?\b/,
+      /\b(physical|secondary)\s+(exam|assessment|survey)\b/,
+      /\b(full|complete)\s+(body\s+)?(physical|exam|assessment)\b/,
     ];
     
     return strongActionPatterns.some(pattern => pattern.test(normalized));
@@ -2094,6 +2299,16 @@ Format your response as valid JSON only, with exactly these keys: assessment (st
       /\b(where|show\s+me\s+where)\s+(does\s+it\s+hurt|is\s+the\s+pain)\b/,  // Pain location
       /\b(can\s+you|please)\s+(open|close|lift|raise|squeeze|move|show)\s+(your|me|my)\b/,  // Patient requests (neuro checks, cooperation)
       /\b(open|squeeze|lift|raise)\s+(your|my)\s+(mouth|hand|eyes|arm|leg)\b/,  // Direct patient requests
+      /\bwe('?re|\s+are)\s+(going\s+to|gonna|here\s+to|staying)\b/,  // "we're going to", "we are gonna stay"
+      /\bwe\s+(see|found|noticed|can\s+see)\s+(the\s+)?(baby|head|crowning)/,  // OB findings communicated to patient
+      /\bstay(ing)?\s+here\b/,  // "we're staying here"
+      /\bprepare\s+(the\s+)?(area|for)\s+(delivery|birth)\b/,  // OB delivery prep announcement
+      /\b(everything\s+is|you'?re\s+(going\s+to\s+be|doing))\s+(okay|fine|alright|great|well)\b/,  // Reassurance
+      /^(like\s+what|such\s+as|for\s+example|can\s+you\s+elaborate|tell\s+me\s+more|go\s+on|please\s+continue|anything\s+else|what\s+else|what\s+kind|what\s+type|how\s+so|why'?s\s+that|really\?|and\?|oh\?)\??\.?$/,  // Short follow-up clarifications
+      /^(what\s+do\s+you\s+mean|what\s+medications?|what\s+conditions?|what\s+allergies?|which\s+ones?|how\s+long\s+ago|when\s+did\s+that\s+happen|how\s+often)\b/,  // History follow-ups
+      /\b(tell\s+me\s+more\s+about|can\s+you\s+describe|what\s+does\s+the\s+(pain|discomfort|problem)\s+feel\s+like)\b/,  // Elaboration requests
+      /^(which|what|where|when|how|why|who)\s+\w+(\s+\w+){0,4}\??\.?$/,  // Any short interrogative follow-up (≤6 words)
+      /^(can\s+you|could\s+you|would\s+you)\s+(be\s+more\s+specific|clarify|explain)\b/,  // Politely asking for clarification
     ];
     
     return strongConversationPatterns.some(pattern => pattern.test(normalized));
@@ -2162,14 +2377,20 @@ Respond with ONLY one word: either "CONVERSATION" or "ACTION".`;
     // STEP 1: Check for intent/future tense statements first
     // These should always be treated as conversation (no action performed yet)
     const intentPatterns = [
-      /\bi'?m\s+(?:going\s+to|gonna)\s+/,
-      /\bi\s+will\s+/,
-      /\bi'?ll\s+/,
+      /\bi'?m\s+(?:also\s+)?(?:going\s+to|gonna)\s+/,
+      /\bwe'?re?\s+(?:also\s+)?(?:going\s+to|gonna)\s+/,
+      /\bwe\s+(?:are\s+)?(?:also\s+)?(?:going\s+to|gonna)\s+/,
+      /\bi\s+(?:also\s+)?will\s+/,
+      /\bwe\s+(?:also\s+)?will\s+/,
+      /\bi'?ll\s+(?:also\s+)?/,
+      /\bwe'?ll\s+(?:also\s+)?/,
       /\blet\s+me\s+/,
-      /\bi\s+want\s+to\s+/,
-      /\bi'?d\s+like\s+to\s+/,
+      /\bi\s+(?:also\s+)?want\s+to\s+/,
+      /\bi'?d\s+(?:also\s+)?like\s+to\s+/,
       /\bcan\s+i\s+/,
-      /\bmay\s+i\s+/
+      /\bmay\s+i\s+/,
+      /\bjust\s+(?:going\s+to|gonna|want\s+to|need\s+to)\s+/,
+      /\bi\s+(?:also\s+)?need\s+to\s+/,
     ];
     
     const isIntent = intentPatterns.some(pattern => pattern.test(message));
@@ -2224,6 +2445,94 @@ Respond with ONLY one word: either "CONVERSATION" or "ACTION".`;
    * @param {Object} generatedScenario - The AI-generated scenario data
    * @returns {string} - Scene description only, no patient dialogue
    */
+  /**
+   * Generate an objective airway finding when EMT asks patient to open their mouth
+   * Finding is scenario-aware: respiratory/trauma/unconscious patients may have obstructions.
+   */
+  generateAirwayFinding(scenarioData) {
+    const subScenario = (scenarioData?.subScenario || '').toLowerCase();
+    const gender = (scenarioData?.generatedScenario?.patientProfile?.gender || 'male').toLowerCase();
+    const consciousness = (scenarioData?.generatedScenario?.physicalFindings?.consciousness || 'alert').toLowerCase();
+    const pronoun = gender === 'female' ? 'Her' : 'His';
+
+    const isAltered = /confus|unconscious|unresponsive|altered/.test(consciousness);
+    const isTrauma = /mvc|fall|assault|sport|stabbing|gsw|burn|trauma/.test(subScenario);
+    const isRespiratory = /respiratory|asthma|breathing/.test(subScenario);
+
+    // Patients who cannot cooperate open their mouth passively via jaw-thrust/chin-lift
+    const openVerb = isAltered ? 'You open the airway with a jaw thrust. The mouth falls open.' : 'The patient opens their mouth.';
+
+    let finding;
+
+    if (isAltered) {
+      // Altered patients: higher risk of obstruction
+      const findings = [
+        `${openVerb} Airway is patent. No secretions, blood, or foreign bodies visible. Tongue in normal position.`,
+        `${openVerb} Secretions pooling at the posterior pharynx. Airway at risk — suctioning indicated.`,
+        `${openVerb} Airway is clear. Mild moisture visible on mucosa. No obstruction.`,
+      ];
+      finding = findings[Math.floor(Math.random() * findings.length)];
+    } else if (isTrauma) {
+      const findings = [
+        `${openVerb} Airway is patent. No blood, broken teeth, or foreign bodies. Mucosa intact.`,
+        `${openVerb} Traces of blood visible in the oral cavity. No active bleeding or obstruction. Monitor closely.`,
+        `${openVerb} Airway is clear. No obstructions noted.`,
+      ];
+      finding = findings[Math.floor(Math.random() * findings.length)];
+    } else if (isRespiratory) {
+      const findings = [
+        `${openVerb} Airway is patent. No obstruction. ${pronoun} lips show mild cyanosis.`,
+        `${openVerb} Airway is clear. No foreign bodies or secretions. Mild accessory muscle use noted.`,
+        `${openVerb} Airway patent, no obstruction.`,
+      ];
+      finding = findings[Math.floor(Math.random() * findings.length)];
+    } else {
+      // Standard medical — clear airway is most common
+      const findings = [
+        `${openVerb} Airway is patent. No obstruction, foreign bodies, or secretions visible.`,
+        `${openVerb} Airway is clear and patent.`,
+        `${openVerb} No obstructions. Mucosa pink and moist.`,
+      ];
+      finding = findings[Math.floor(Math.random() * findings.length)];
+    }
+
+    return `${finding}\n\nAwaiting your next step.`;
+  }
+
+  /**
+   * Generate objective Cincinnati/FAST stroke assessment findings based on scenario type.
+   * Reports: Facial droop, Arm drift, Speech, and time of symptom onset.
+   */
+  generateStrokeAssessmentFindings(scenarioData) {
+    const subScenario = (scenarioData?.subScenario || '').toLowerCase();
+    const symptoms = (scenarioData?.dispatchInfo?.symptoms || scenarioData?.generatedScenario?.presentation?.chiefComplaint || '').toLowerCase();
+    const isNeuro = /neurolog|stroke|seizure/.test(subScenario) || /weakness|drooping|slurr|speech|numb|vision|headache|confusion|confus/.test(symptoms);
+
+    if (isNeuro) {
+      // Positive stroke findings — scenario involves neurological complaint
+      return `Cincinnati Prehospital Stroke Scale (CPSS) assessment:
+
+**Facial Droop:** Positive — right-sided facial droop present. Left side moves normally when patient smiles.
+**Arm Drift:** Positive — right arm drifts downward within seconds when both arms are extended with eyes closed.
+**Speech:** Abnormal — speech is slurred; patient uses incorrect words at times.
+
+CPSS Result: 3 out of 3 positive — high suspicion for acute stroke.
+
+Awaiting your next step.`;
+    } else {
+      // Negative stroke findings — non-neurological scenario
+      return `Cincinnati Prehospital Stroke Scale (CPSS) assessment:
+
+**Facial Droop:** Negative — both sides of face move equally when patient smiles.
+**Arm Drift:** Negative — both arms remain in position when extended with eyes closed.
+**Speech:** Normal — patient speaks clearly and uses correct words.
+
+CPSS Result: 0 out of 3 positive — no acute stroke signs at this time.
+
+Awaiting your next step.`;
+    }
+  }
+
   async buildSceneOnlyImpression(generatedScenario) {
     try {
       const { patientProfile, physicalFindings, dispatchInfo, presentation } = generatedScenario;
@@ -2372,30 +2681,13 @@ Do NOT mention specific symptoms or complaints. Only describe what is visually o
     }
   }
 
-  // Handle new exam assessment request
+  // Handle new exam assessment request — immediately return findings, no quizzing
   async handleExamAssessment(userMessage, conversation, scenarioData, examIntent) {
-    const sessionId = this.generateSessionId(conversation);
-    
-    // Start new assessment
-    const assessment = this.examAssessmentManager.startExamAssessment(sessionId, examIntent, scenarioData);
-    
-    if (!assessment) {
-      return {
-        response: 'I apologize, but I cannot start that type of examination assessment right now. Please try again.',
-        additionalMessages: [],
-        enhancedScenarioData: scenarioData
-      };
-    }
-
-    // Generate acknowledgment and first question
-    const acknowledgment = this.examAssessmentManager.generateAcknowledgmentMessage(examIntent);
-    const firstQuestion = this.examAssessmentManager.getCurrentQuestion(sessionId);
-    
-    const response = `${acknowledgment}\n\n**Question ${firstQuestion.questionNumber} of ${firstQuestion.totalQuestions}:**\n${firstQuestion.questionText}\n\nAwaiting your next step.`;
-    
+    const findings = await this.generateExamFindings(examIntent.examKey, scenarioData);
+    const response = `${findings}\n\nAwaiting your next step.`;
     return {
       response,
-      additionalMessages: [{ role: 'system', content: 'examAssessmentActive' }],
+      additionalMessages: [],
       enhancedScenarioData: scenarioData
     };
   }
@@ -2458,17 +2750,48 @@ Do NOT mention specific symptoms or complaints. Only describe what is visually o
 
       const instruction = examTypeInstructions[examKey] || examTypeInstructions.focusedChest;
       
-      const systemPrompt = `You are an EMT instructor providing realistic examination findings. Generate comprehensive, scenario-appropriate findings for the requested examination. Be specific and use proper medical terminology while keeping findings at EMT level. Include both normal and any relevant abnormal findings based on the patient's condition.`;
+      const systemPrompt = `You are an EMT instructor providing realistic examination findings. Generate comprehensive, scenario-appropriate findings for the requested examination. Include both normal and any relevant abnormal findings based on the patient's condition. Do NOT include any summary section, closing summary, or "Assessment Summary" label. Just provide the findings directly.
+
+CRITICAL - Language level: Write at the level of an EMT-Basic, NOT a paramedic or physician. Use plain, everyday language for findings. Avoid advanced medical terminology that is outside EMT-Basic scope. Examples of what NOT to use: periorbital ecchymosis (say "bruising around the eyes"), hemothorax (say "blood in the chest cavity"), pneumothorax (say "collapsed lung"), crepitus (say "a crackling feeling"), subcutaneous emphysema (say "air bubbles under the skin"), tachycardia (say "fast heart rate"), diaphoretic (say "sweating heavily"). Use the kind of words an EMT would say out loud to their partner.`;
       
-      const userPrompt = `${instruction}\n\nPatient scenario: ${scenarioData?.generatedScenario?.presentation?.chiefComplaint || 'chest pain patient'}\nAge: ${scenarioData?.generatedScenario?.patientProfile?.age || 'unknown'}\nGender: ${scenarioData?.generatedScenario?.patientProfile?.gender || 'unknown'}`;
+      const gs = scenarioData?.generatedScenario || {};
+      const profile = gs.patientProfile || {};
+      const presentation = gs.presentation || {};
+      const physical = gs.physicalFindings || {};
+      const expected = gs.expectedFindings || {};
+      const dispatch = gs.dispatchInfo || {};
+      const vitals = gs.vitals || {};
+
+      const userPrompt = `${instruction}
+
+PATIENT DETAILS — use these to generate consistent findings:
+- Name: ${profile.name || 'unknown'}, Age: ${profile.age || 'unknown'}, Gender: ${profile.gender || 'unknown'}
+- Chief complaint: ${presentation.chiefComplaint || 'unknown'}
+- Mechanism / dispatch info: ${dispatch.mechanism || 'unknown'}
+- Severity: ${presentation.severity || 'unknown'}
+- General appearance: ${physical.generalAppearance || 'unknown'}
+- Consciousness: ${physical.consciousness || 'unknown'}
+- Airway: ${physical.airway || 'unknown'}
+- Breathing: ${physical.breathing || 'unknown'}
+- Circulation: ${physical.circulation || 'unknown'}
+- Skin: ${physical.skin || 'unknown'}
+- What EMTs should observe (inspection): ${expected.inspection || 'unknown'}
+- What EMTs should feel (palpation): ${expected.palpation || 'unknown'}
+- What EMTs should hear (auscultation): ${expected.auscultation || 'unknown'}
+- Vitals: HR ${vitals.heartRate || '?'}, BP ${vitals.bloodPressure || '?'}, RR ${vitals.respiratoryRate || '?'}, SpO2 ${vitals.spO2 || '?'}%
+
+IMPORTANT: Every finding you generate MUST be consistent with the patient details above. Do not introduce injuries, pain, or abnormalities in body regions that are not relevant to this patient's condition.`;
 
       const messages = [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt }
       ];
 
-      const response = await this.callOpenAI(messages, { model: 'gpt-4o-mini' });
-      
+      let response = await this.callOpenAI(messages, { model: 'gpt-4o-mini' });
+
+      // Strip any trailing summary section the AI may add
+      response = response.replace(/\n*\*?\*?Assessment Summary\*?\*?:[\s\S]*/i, '').trim();
+
       return response;
     } catch (error) {
       console.error('Error generating exam findings:', error);

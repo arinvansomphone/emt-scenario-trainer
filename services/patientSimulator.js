@@ -80,7 +80,7 @@ class PatientSimulator {
    * @returns {Object} - Baseline vital signs
    */
   getBaselineVitals(scenarioData) {
-    const difficulty = scenarioData?.generatedScenario?.difficulty?.level || 'intermediate';
+    const difficulty = scenarioData?.generatedScenario?.difficulty?.level || 'novice';
     const scenarioType = this.determineScenarioType(scenarioData);
     
     // Get base vitals from scenario if available
@@ -92,7 +92,8 @@ class PatientSimulator {
         systolic: scenarioVitals.bloodPressureSystolic || 130,
         diastolic: scenarioVitals.bloodPressureDiastolic || 80,
         temperature: scenarioVitals.temperature || 98.6,
-        spO2: scenarioVitals.spO2 || 96
+        spO2: scenarioVitals.spO2 || 96,
+        bloodGlucose: scenarioVitals.bloodGlucose || 100
       };
     }
 
@@ -127,13 +128,13 @@ class PatientSimulator {
    */
   getVitalsByCategory(category, difficulty) {
     const baseVitals = {
-      cardiac: { heartRate: 110, respiratoryRate: 20, systolic: 160, diastolic: 95, spO2: 92, temperature: 98.6 },
-      respiratory: { heartRate: 88, respiratoryRate: 24, systolic: 140, diastolic: 85, spO2: 89, temperature: 98.6 },
-      trauma: { heartRate: 105, respiratoryRate: 22, systolic: 145, diastolic: 88, spO2: 95, temperature: 98.6 },
-      neurologic: { heartRate: 85, respiratoryRate: 16, systolic: 130, diastolic: 80, spO2: 97, temperature: 98.6 },
-      metabolic: { heartRate: 95, respiratoryRate: 18, systolic: 135, diastolic: 82, spO2: 94, temperature: 98.6 },
-      allergic: { heartRate: 120, respiratoryRate: 26, systolic: 100, diastolic: 60, spO2: 88, temperature: 98.6 },
-      general: { heartRate: 90, respiratoryRate: 18, systolic: 130, diastolic: 80, spO2: 96, temperature: 98.6 }
+      cardiac:     { heartRate: 110, respiratoryRate: 20, systolic: 160, diastolic: 95,  spO2: 92, temperature: 98.6, bloodGlucose: 110 },
+      respiratory: { heartRate: 88,  respiratoryRate: 24, systolic: 140, diastolic: 85,  spO2: 89, temperature: 98.6, bloodGlucose: 100 },
+      trauma:      { heartRate: 105, respiratoryRate: 22, systolic: 145, diastolic: 88,  spO2: 95, temperature: 98.6, bloodGlucose: 120 },
+      neurologic:  { heartRate: 85,  respiratoryRate: 16, systolic: 130, diastolic: 80,  spO2: 97, temperature: 98.6, bloodGlucose: 105 },
+      metabolic:   { heartRate: 95,  respiratoryRate: 18, systolic: 135, diastolic: 82,  spO2: 94, temperature: 98.6, bloodGlucose: 42  },
+      allergic:    { heartRate: 120, respiratoryRate: 26, systolic: 100, diastolic: 60,  spO2: 88, temperature: 98.6, bloodGlucose: 98  },
+      general:     { heartRate: 90,  respiratoryRate: 18, systolic: 130, diastolic: 80,  spO2: 96, temperature: 98.6, bloodGlucose: 100 }
     };
 
     let vitals = { ...baseVitals[category] || baseVitals.general };
@@ -237,7 +238,7 @@ class PatientSimulator {
     const currentVitals = this.getCurrentVitals();
     const newVitals = { ...currentVitals };
     const scenarioType = this.determineScenarioType(scenarioData);
-    const difficulty = scenarioData?.generatedScenario?.difficulty?.level || 'intermediate';
+    const difficulty = scenarioData?.generatedScenario?.difficulty?.level || 'novice';
 
     // Check if critical interventions are missing
     const criticalInterventions = this.getCriticalInterventions(scenarioType);
@@ -352,19 +353,23 @@ class PatientSimulator {
     const normalizedType = vitalType.toLowerCase();
 
     if (/(heart rate|pulse|hr)/.test(normalizedType)) {
-      return `Heart rate: ${currentVitals.heartRate} bpm`;
+      return `Heart rate is ${currentVitals.heartRate} beats per minute.`;
     }
-    if (/(respiratory rate|breathing|rr|respiration)/.test(normalizedType)) {
-      return `Respiratory rate: ${currentVitals.respiratoryRate} per minute`;
+    if (/(respiratory rate|respiration rate|breathing|rr|respiration)/.test(normalizedType)) {
+      return `Respiratory rate is ${currentVitals.respiratoryRate} breaths per minute.`;
     }
     if (/(blood pressure|bp)/.test(normalizedType)) {
-      return `Blood pressure: ${currentVitals.systolic}/${currentVitals.diastolic} mmHg`;
+      return `Blood pressure is ${currentVitals.systolic} over ${currentVitals.diastolic}.`;
     }
     if (/(oxygen saturation|pulse ox|spo2|o2 sat)/.test(normalizedType)) {
-      return `Oxygen saturation: ${currentVitals.spO2}%`;
+      return `Oxygen saturation is ${currentVitals.spO2} percent.`;
     }
     if (/(temperature|temp)/.test(normalizedType)) {
-      return `Temperature: ${currentVitals.temperature.toFixed(1)}°F`;
+      return `Temperature is ${currentVitals.temperature.toFixed(1)} degrees Fahrenheit.`;
+    }
+    if (/(blood glucose|glucose|bgl|blood sugar|sugar level|glucometry|glucometer)/.test(normalizedType)) {
+      const bgl = currentVitals.bloodGlucose || 100;
+      return `Blood glucose is ${bgl} milligrams per deciliter.`;
     }
 
     return `Please specify which vital sign you'd like to check.`;
@@ -377,7 +382,7 @@ class PatientSimulator {
   updateConsciousness(scenarioData) {
     const elapsedMinutes = this.getElapsedTime();
     const currentVitals = this.getCurrentVitals();
-    const difficulty = scenarioData?.generatedScenario?.difficulty?.level || 'intermediate';
+    const difficulty = scenarioData?.generatedScenario?.difficulty?.level || 'novice';
 
     // Consciousness changes based on vitals and time
     if (currentVitals.spO2 < 80 || currentVitals.systolic < 80) {
@@ -424,8 +429,10 @@ class PatientSimulator {
         return 'I\'m confused... what\'s happening?';
       
       case 'alert':
-      default:
-        return this.generateAlertPatientResponse(normalizedQuestion, scenarioData);
+      default: {
+        const alertResponse = this.generateAlertPatientResponse(normalizedQuestion, scenarioData);
+        return alertResponse !== null ? alertResponse : null;
+      }
     }
   }
 
@@ -440,7 +447,8 @@ class PatientSimulator {
     const patientProfile = scenarioData?.generatedScenario?.patientProfile;
     
     if (/(name|who are you)/.test(normalizedQuestion)) {
-      return 'My name is John Smith.'; // Generic name for simulation
+      const name = patientProfile?.name;
+      return name ? `My name is ${name}.` : 'My name is... sorry, I\'m not feeling well.';
     }
     
     if (/(age|old)/.test(normalizedQuestion)) {
@@ -486,7 +494,7 @@ class PatientSimulator {
       return `I have a history of ${history.join(', ')}.`;
     }
     
-    return 'I\'m not sure about that. Can you help me?';
+    return null;
   }
 
   /**
@@ -539,28 +547,7 @@ class PatientSimulator {
     console.log('📊 Vitals updated:', updatedVitals);
   }
 
-  /**
-   * Update consciousness level based on condition and interventions
-   */
-  updateConsciousness() {
-    if (!this.scenarioStartTime) return;
-    
-    const currentVitals = this.getCurrentVitals();
-    const elapsedMinutes = this.getElapsedTime();
-    
-    // Determine consciousness based on vitals and time
-    if (currentVitals.spO2 < 80 || currentVitals.systolic < 80) {
-      this.consciousnessLevel = 'altered';
-    } else if (currentVitals.spO2 < 70 || currentVitals.systolic < 70) {
-      this.consciousnessLevel = 'unconscious';
-    } else if (elapsedMinutes > 10 && this.interventionsPerformed.length === 0) {
-      this.consciousnessLevel = 'altered'; // Deterioration without treatment
-    } else {
-      this.consciousnessLevel = 'alert';
-    }
-    
-    console.log('🧠 Consciousness updated:', this.consciousnessLevel);
-  }
+  // Duplicate removed — use updateConsciousness(scenarioData) above.
 
   /**
    * Check if scenario should end
